@@ -10,7 +10,7 @@ from datetime import datetime
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import TrajEncoder, TrajDecoder, BiasLoss
+from Models import TrajEncoder, TrajDecoder
 from Train.Utils import renderPlot
 
 
