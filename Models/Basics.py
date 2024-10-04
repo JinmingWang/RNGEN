@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 from einops import rearrange
+from typing import List, Literal, Tuple
+
+Tensor = torch.Tensor
 
 class AttentionBlock(nn.Module):
     def __init__(self, in_c: int, head_c: int, expand_c: int, out_c: int, num_heads: int, dropout: float=0.1):
@@ -137,7 +140,7 @@ class NegLogEuclidianAttn(nn.Module):
             nn.Linear(context_c, (head_c + in_c) * num_heads),
         )
 
-        self.merge_head_proj = nn.Linear(in_c * self.H, in_c)
+        self.merge_head_proj = nn.Linear(in_c * self.H +in_c, in_c)
 
         self.ff = nn.Sequential(
             nn.LayerNorm(in_c),
@@ -159,13 +162,27 @@ class NegLogEuclidianAttn(nn.Module):
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        score = -torch.log(torch.cdist(q, k))
+        # Here I tested multiple different metric scores
+        # -log(qk), exp(-qk), exp(-6qk), but none of these perform better than 1 / qk
+        # score = torch.exp(-6 * torch.cdist(q, k))
+        score = 1 / torch.cdist(q, k)
 
         # out shape: (B, N, H*in_c)
         out = rearrange(torch.bmm(score, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = x + self.merge_head_proj(out)
+        # We observe a diagonal in the output picture, it takes many training to remove it
+        # It seems the diagonal comes from this residual
+        # x = x + self.merge_head_proj(out)
+
+        # Without residual, the model learns a square in the middle
+        # The loss is low at the beginning, but does not decrease very much like residual-version
+        # x = self.merge_head_proj(out)
+
+        # Concatenation looks like a best version
+        # The cost is only more input channels (64 more channels)
+        x = self.merge_head_proj(torch.cat([out, x], dim=2))
 
         return self.ff(x) + self.shortcut(x)
+
 
 class Transpose(nn.Module):
     def __init__(self, dim0: int, dim1: int):
@@ -177,7 +194,7 @@ class Transpose(nn.Module):
         return x.transpose(self.dim0, self.dim1)
 
 
-class Res(nn.Module):
+class Res2D(nn.Module):
     def __init__(self, in_c: int, out_c: int):
         super().__init__()
 
@@ -196,10 +213,38 @@ class Res(nn.Module):
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
 
+
+class Res1D(nn.Module):
+    def __init__(self, in_c: int, mid_c: int, out_c: int):
+        super().__init__()
+
+        self.layers = nn.Sequential(
+            nn.Conv1d(in_c, mid_c, 3, 1, 1),
+            nn.BatchNorm1d(mid_c),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv1d(mid_c, mid_c, 3, 1, 1),
+            nn.BatchNorm1d(mid_c),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv1d(mid_c, out_c, 3, 1, 1)
+        )
+
+        self.shortcut = nn.Identity() if in_c == out_c else nn.Conv1d(in_c, out_c, 1, 1, 0)
+
+    def forward(self, x):
+        return self.shortcut(x) + self.layers(x)
 class Conv2dInAct(nn.Sequential):
     def __init__(self, in_c: int, out_c: int, k: int, s: 1, p: 0):
         super().__init__(
             nn.Conv2d(in_c, out_c, k, s, p),
             nn.InstanceNorm2d(out_c),
+            nn.LeakyReLU(inplace=True)
+        )
+
+
+class Conv1dBnAct(nn.Sequential):
+    def __init__(self, in_c: int, out_c: int, k: int, s: 1, p: 0):
+        super().__init__(
+            nn.Conv1d(in_c, out_c, k, s, p),
+            nn.BatchNorm1d(out_c),
             nn.LeakyReLU(inplace=True)
         )
