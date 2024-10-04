@@ -1,5 +1,5 @@
 import torch
-from typing import List, Tuple
+from typing import List, Tuple, Set, FrozenSet
 import matplotlib.pyplot as plt
 import random
 
@@ -8,6 +8,7 @@ Tensor = torch.Tensor
 Node = Tensor  # (2,)
 Trajectory = Tensor  # (T, 2)
 
+# LaDe Dataset: https://arxiv.org/abs/2306.10675
 DATASET_ROOT = "/home/jimmy/Data/LaDe"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -153,7 +154,7 @@ def visualizeTraj(traj: Trajectory) -> None:
     :param traj: tensor of shape (T, 2)
     :return:
     """
-    traj = traj.cpu().numpy()
+    traj = traj.detach().cpu().numpy()
     plt.scatter(traj[:, 0], traj[:, 1], c="#0000FF", marker='.', s=10, alpha=0.5)
     plt.plot(traj[:, 0], traj[:, 1], c="#000000", alpha=0.1, linewidth=1)
     plt.xlabel("Longitude")

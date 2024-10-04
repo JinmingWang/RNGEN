@@ -1,4 +1,4 @@
-import os.path
+# LaDe Dataset: https://arxiv.org/abs/2306.10675
 
 from torch.utils.data import Dataset
 from .Utils import *
@@ -7,8 +7,8 @@ from tqdm import tqdm
 
 class LaDeDataset(Dataset):
     def __init__(self,
-                 graph_depth: int = 20,
-                 min_trajs: int = 32,
+                 graph_depth: int = 10,
+                 trajs_per_graph: int = 64,
                  rotation: bool = True,
                  scaling_range: float = 0.2,
                  traj_step_mean: float = 0.1,
@@ -41,7 +41,7 @@ class LaDeDataset(Dataset):
         _, self.nodes, self.edges, self.degrees, _ = torch.load(f"{DATASET_ROOT}/processed_roads_Shanghai.pt")
         self.nodes: Tensor = self.nodes.to(DEVICE)
         self.graph_depth = graph_depth
-        self.min_trajs = min_trajs
+        self.trajs_per_graph = trajs_per_graph
         self.rotation = rotation
         self.scaling_range = scaling_range
         self.traj_step_mean = traj_step_mean
@@ -65,46 +65,59 @@ class LaDeDataset(Dataset):
         # angle = 0 if not self.rotation else torch.rand(1) * 2 * 3.1415926
         # scale = torch.rand(1) * (self.scaling_range * 2) + 1 - self.scaling_range
         # graph.transform(angle, scale.to(DEVICE))
-        trajs = self.generateTrajsFromGraph(graph)
+        trajs, paths = self.generateTrajsFromGraph(graph)
         graph_tensor = graph.toTensor()
         heatmap = self.getHeatmap(graph_tensor, trajs, 64, 64)
-        return trajs, graph_tensor, heatmap
+        return trajs, paths, graph_tensor, heatmap
 
     def getSubGraph(self) -> SegmentGraph:
-        subgraph = SegmentGraph()
         # select a random node with degree > 2
         random_id = random.randint(0, len(self.candidates) - 1)
         node_i = self.candidates[random_id]
+
+        visited_edges: Set[FrozenSet[int]] = set()
+        visited_nodes: Set[int] = {node_i}
+        frontier: Set[int] = {node_i}
+        depth: int = 0
+
         # use breadth-first search to find the nearest node
-        fixed_set = []
-        frontier = [node_i]
-        depth = 0
         while len(frontier) > 0 and depth < self.graph_depth:
-            node_i = frontier.pop(0)
-            fixed_set.append(node_i)
-            node_1 = self.nodes[node_i]
-            for edge in range(self.degrees[node_i]):
-                j = self.edges[node_i][edge]
-                if j not in fixed_set:
-                    node_2 = self.nodes[j]
-                    subgraph.append(Segment(node_1, node_2))
-                    frontier.append(j)
+            new_frontier = []
+            # iterate over nodes in the frontier
+            for node_id in frontier:
+                # iterate over edges connected to the node
+                for neighbor_id in range(self.degrees[node_id]):
+                    neighbor_node_id = self.edges[node_id][neighbor_id]
+                    edge = frozenset((node_id, neighbor_node_id))
+                    if edge not in visited_edges:
+                        visited_edges.add(edge)
+                        if neighbor_node_id not in visited_nodes:
+                            visited_nodes.add(neighbor_node_id)
+                            new_frontier.append(neighbor_node_id)
+            frontier = set(new_frontier)
             depth += 1
+
+        subgraph = SegmentGraph()
+
+        for edge in visited_edges:
+            node_id_1, node_id_2 = list(edge)
+            subgraph.append(Segment(self.nodes[node_id_1], self.nodes[node_id_2]))
 
         return subgraph
 
 
-    def generateTrajsFromGraph(self, graph: SegmentGraph) -> Tensor:
+    def generateTrajsFromGraph(self, graph: SegmentGraph) -> Tuple[Tensor, Tensor]:
         """
         Generate trajectories from the graph.
         :param graph: the graph to generate trajectories from
         :return: N trajectories
         """
         num_segments = len(graph)
+        path_len = self.graph_depth * 2 + 1
 
         trajectories = []
-        n_trajs = torch.randint(min(self.min_trajs, num_segments), max(self.min_trajs, num_segments) * 2, (1,)).item()
-        for i in range(n_trajs):
+        paths = []
+        for i in range(self.trajs_per_graph):
             # randomly choose a starting segment
             start_sid = random.randint(0, num_segments - 1)
             # get a random path from the graph
@@ -113,8 +126,9 @@ class LaDeDataset(Dataset):
             visiting_nodes = torch.stack(path)
             trajectory = self.simulateTrajectory(visiting_nodes)
             trajectories.append(trajectory)
+            paths.append(torch.nn.functional.pad(visiting_nodes, (0, 0, 0, path_len - visiting_nodes.shape[0])))
 
-        return torch.stack(trajectories, dim=0)
+        return torch.stack(trajectories, dim=0), torch.stack(paths)
 
 
     def simulateTrajectory(self, visiting_nodes: Tensor) -> Tensor:
@@ -200,7 +214,7 @@ class LaDeDataset(Dataset):
     def collate_fn(batch_list: List[Tuple[Tensor, Tensor, List[Tensor]]]) -> Tuple[List[Tensor], List[Tensor], Tensor]:
         """
         pack data into a batch
-        :param batch_list: a list of the return of LaDeDataset.__getitem__
+        :param batch_list: a list of the return of LaDeDatasetCacheGenerator.__getitem__
         :return: the list of graphs, each graph is in shape (?, 2, 2). The list of lists of trajectories,
         the outer list is a batch of data, the inner list is a sample, it contains many trajs of shape (?, 2).
         """
