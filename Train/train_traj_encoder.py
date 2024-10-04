@@ -5,35 +5,34 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 
+import numpy as np
 from tqdm import tqdm
 from datetime import datetime
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import TrajEncoder, TrajDecoder
-from Train.Utils import renderPlot
+from Models import TrajAutoEncoder
+from Train.Utils import renderPlotHeatmap, renderPlotTraj
 
 
 def train():
-    epochs = 500
+    epochs = 100
 
     torch.autograd.set_detect_anomaly(True)
 
-    dataset = LaDeCachedDataset("./Dataset/Shanghai_500_Cache.pth")
+    prefix = "./Dataset/Shanghai_Cached_"
+    dataset = LaDeCachedDataset(prefix + "graphs.pth", prefix + "heatmaps.pth", prefix + "trajs.pth")
 
 
     dataloader = DataLoader(dataset, batch_size=20, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn)
 
-    loss_func = nn.MSELoss()
+    TAE = TrajAutoEncoder().to(DEVICE)
 
-    encoder = TrajEncoder().to(DEVICE)
-    decoder = TrajDecoder().to(DEVICE)
+    # encoder, decoder = torch.load("Runs/2024-09-30_07-59-11/last.pth")
 
-    encoder, decoder = torch.load("Runs/2024-09-30_07-59-11/last.pth")
+    optimizer = AdamW(TAE.parameters(), lr=2e-4)
 
-    optimizer = AdamW([{"params": encoder.parameters()}, {"params": decoder.parameters()}], lr=2e-4)
-
-    lr_scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.1, patience=10, min_lr=1e-6)
+    lr_scheduler = ReduceLROnPlateau(optimizer, mode="min", factor=0.5, patience=10, min_lr=1e-6)
 
     now_str = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     log_dir = f"./Runs/{now_str}/"
@@ -42,39 +41,37 @@ def train():
 
     iterations = 0
     best_loss = float("inf")
+    recent_loss = [0] * 10
 
     for e in range(epochs):
         total_loss = 0
         pbar = tqdm(dataloader, desc=f"Training Epoch {e + 1}/{epochs}")
         for batch_trajs, batch_graph, batch_heatmap in pbar:
-            optimizer.zero_grad()
+            loss, output = TAE.trainStep(optimizer, trajs=batch_trajs, heatmap=batch_heatmap)
 
-            batch_traj_enc = encoder(batch_trajs)
-            pred_heatmap = decoder(batch_traj_enc)
-
-            loss = loss_func(pred_heatmap, batch_heatmap)
-            loss.backward()
-
-            optimizer.step()
-
-            total_loss += loss.item()
+            total_loss += loss
             iterations += 1
+            recent_loss.pop(0)
+            recent_loss.append(loss)
 
-            pbar.set_postfix_str(f"loss={loss.item():.7f}, lr={optimizer.param_groups[0]['lr']:.5e}")
+            pbar.set_postfix_str(f"loss={np.mean(recent_loss):.7f}, lr={optimizer.param_groups[0]['lr']:.5e}")
 
             if iterations % 5 == 0:
-                writer.add_scalar("loss", loss, iterations)
+                writer.add_scalar("loss", np.mean(recent_loss), iterations)
                 writer.add_scalar("lr", optimizer.param_groups[0]["lr"], iterations)
 
             if iterations % 50 == 0:
+                # writer.add_figure("Plots",
+                #                   renderPlot(batch_graph[0], batch_trajs[0], batch_heatmap[0], output[0]),
+                #                   iterations)
                 writer.add_figure("Plots",
-                                  renderPlot(batch_graph[0], batch_trajs[0], batch_heatmap[0], pred_heatmap[0]),
+                                  renderPlotTraj(batch_graph[0], batch_trajs[0], output[0]),
                                   iterations)
 
-        torch.save([encoder, decoder], log_dir + "last.pth")
+        torch.save(TAE, log_dir + "last.pth")
         if total_loss < best_loss:
             best_loss = total_loss
-            torch.save([encoder, decoder], log_dir + "best.pth")
+            torch.save(TAE, log_dir + "best.pth")
 
         lr_scheduler.step(total_loss)
 
