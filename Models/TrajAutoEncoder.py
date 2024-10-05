@@ -10,8 +10,8 @@ class Encoder(nn.Module):
         self.mid_c = traj_len * 2
         self.encode_c = traj_len
 
-        self.conv_layers = nn.Sequential(     # (N, 128, 2) => 256N
-            Transpose(1, 2),    # (N, 2, 128)
+        self.conv_layers = nn.Sequential(     # (BN, L, 2)
+            Transpose(1, 2),    # (BN, 2, L)
 
             Conv1dBnAct(2, 16, 3, 1, 1),
             Conv1dBnAct(16, 16, 3, 2, 1),
@@ -24,8 +24,8 @@ class Encoder(nn.Module):
 
             Conv1dBnAct(64, 128, 3, 1, 1),
             Conv1dBnAct(128, 128, 3, 2, 1),
-            nn.Flatten(1),  # (N, 8*128) = 1024N
-            nn.Linear(1024, 512),
+            nn.Flatten(1),  # (BN, 128, L//16)
+            nn.Linear(traj_len * 8, 512),
             nn.LeakyReLU(inplace=True),
             nn.Linear(512, self.mid_c),
         )
@@ -95,18 +95,19 @@ class Decoder(nn.Module):
 
 class TrajAutoEncoder(nn.Module):
     def __init__(self,
+                 traj_len: int = 128,
                  encode_c: int = 128,
                  N_trajs: int = 32,
                  include_decoder: bool = True):
         super().__init__()
-        self.encoder = Encoder(N_trajs, 128)
+        self.encoder = Encoder(N_trajs, traj_len)
         if include_decoder:
             self.decoder = Decoder(N_trajs, encode_c)
 
         self.loss_func = nn.MSELoss()
 
-    def forward(self, trajs):
-        enc = self.encoder(torch.stack(trajs))
+    def forward(self, trajs: Tensor):
+        enc = self.encoder(trajs)
         if hasattr(self, 'decoder'):
             return self.decoder(enc)
         return enc

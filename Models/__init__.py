@@ -1,2 +1,3 @@
 from .HungarianLoss import HungarianLoss
-from .SmallModel import SmallModel
+from .NodeEdgeModel import DiffusionNetwork
+from .TrajAutoEncoder import TrajAutoEncoder

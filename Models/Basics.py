@@ -116,9 +116,9 @@ class CrossAttentionBlock(nn.Module):
         return self.ff(x) + self.shortcut(x)
 
 
-class NegLogEuclidianAttn(nn.Module):
-    def __init__(self, in_c: int, context_c: int, head_c: int, expand_c: int, out_c: int, num_heads: int, dropout: float=0.1):
-        super(NegLogEuclidianAttn, self).__init__()
+class AttentionWithTime(nn.Module):
+    def __init__(self, in_c: int, head_c: int, expand_c: int, out_c: int, time_c: int, num_heads: int, dropout: float=0.1):
+        super(AttentionWithTime, self).__init__()
 
         # in shape: (B, N, in_c)
         # Q shape: (B*H, N, head_c)
@@ -128,23 +128,23 @@ class NegLogEuclidianAttn(nn.Module):
         self.head_c = head_c
         self.in_c = in_c
         self.scale = head_c ** -0.5
+        self.time_c = time_c
         self.dropout = nn.Dropout(dropout)
 
-        self.q_proj = nn.Sequential(
+        qkv_dim = head_c * num_heads * 2 + in_c * num_heads
+
+        self.qkv_proj = nn.Sequential(
             nn.LayerNorm(in_c),
-            nn.Linear(in_c, head_c * num_heads),
+            nn.Linear(in_c, qkv_dim),
         )
 
-        self.kv_proj = nn.Sequential(
-            nn.LayerNorm(context_c),
-            nn.Linear(context_c, (head_c + in_c) * num_heads),
-        )
+        self.merge_head_proj = nn.Linear(in_c * self.H, in_c)
 
-        self.merge_head_proj = nn.Linear(in_c * self.H +in_c, in_c)
+        self.time_proj = nn.Linear(time_c, time_c)
 
         self.ff = nn.Sequential(
-            nn.LayerNorm(in_c),
-            nn.Linear(in_c, expand_c),
+            nn.LayerNorm(in_c + time_c),
+            nn.Linear(in_c + time_c, expand_c),
             nn.GELU(),
             nn.Dropout(dropout),
             nn.Linear(expand_c, out_c),
@@ -152,36 +152,25 @@ class NegLogEuclidianAttn(nn.Module):
 
         self.shortcut = nn.Linear(in_c, out_c) if in_c != out_c else nn.Identity()
 
-    def forward(self, x, context):
+    def forward(self, x, t):
         B, N, in_c = x.shape
 
-        q = rearrange(self.q_proj(x), 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
-
-        k, v = self.kv_proj(context).split([self.head_c * self.H, in_c * self.H], dim=-1)
-        k = rearrange(k, 'B N (H C) -> (B H) N C', H=self.H)   # (B*H, head_c, N)
+        q, k, v = self.qkv_proj(x).split([self.head_c * self.H, self.head_c * self.H, in_c * self.H], dim=-1)
+        q = rearrange(q, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
+        kt = rearrange(k, 'B N (H C) -> (B H) C N', H=self.H)   # (B*H, head_c, N)
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        # Here I tested multiple different metric scores
-        # -log(qk), exp(-qk), exp(-6qk), but none of these perform better than 1 / qk
-        # score = torch.exp(-6 * torch.cdist(q, k))
-        score = 1 / torch.cdist(q, k)
+        attn = torch.bmm(q, kt) * self.scale
+        attn = func.softmax(attn, dim=-1)
+        attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(score, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        # We observe a diagonal in the output picture, it takes many training to remove it
-        # It seems the diagonal comes from this residual
-        # x = x + self.merge_head_proj(out)
+        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        x = x + self.merge_head_proj(out)
 
-        # Without residual, the model learns a square in the middle
-        # The loss is low at the beginning, but does not decrease very much like residual-version
-        # x = self.merge_head_proj(out)
-
-        # Concatenation looks like a best version
-        # The cost is only more input channels (64 more channels)
-        x = self.merge_head_proj(torch.cat([out, x], dim=2))
-
-        return self.ff(x) + self.shortcut(x)
+        t = self.time_proj(t).view(B, 1, self.time_c).expand(-1, N, -1)     # (B, N, time_c)
+        return self.shortcut(x) + self.ff(torch.cat([x, t], dim=-1))
 
 
 class Transpose(nn.Module):

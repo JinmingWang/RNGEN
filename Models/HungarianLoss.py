@@ -1,4 +1,4 @@
-from torch import cdist
+import torch
 import torch.nn as nn
 from scipy.optimize import linear_sum_assignment
 from typing import Literal
@@ -32,18 +32,20 @@ class HungarianLoss(nn.Module):
     def forward(self, pred, target):
         """ Compute Hungarian loss between pred and target tokens
 
-        :param pred: Predicted tokens of shape (B, D, N)
-        :param target: Target tokens of shape (B, D, N)
+        :param pred: Predicted tokens of shape (B, N, D)
+        :param target: Target tokens of shape (B, N, D)
         """
-
+        B = pred.shape[0]
         # Step 1: Compute pairwise distance matrix (L2 distance)
-        cost_matrix = cdist(pred, target, p=2)
+        cost_matrix = torch.cdist(pred, target, p=2).cpu().detach().numpy()  # (B, N, N)
 
-        # Step 2: Apply Hungarian algorithm
-        row_ind, col_ind = linear_sum_assignment(cost_matrix.cpu().detach().numpy())
+        losses = []
+        for b in range(B):
+            # Step 2: Apply Hungarian algorithm
+            row_ind, col_ind = linear_sum_assignment(cost_matrix[b])
 
-        # Step 3: Compute loss for matched pairs
-        loss = self.base_loss(pred[row_ind], target[col_ind])
+            # Step 3: Compute loss for matched pairs
+            losses.append(self.base_loss(pred[row_ind], target[col_ind]))
 
         # Step 4: Compute penalty for unmatched items
         # However, since both sequences have the same length, there should be no unmatched items
@@ -51,4 +53,4 @@ class HungarianLoss(nn.Module):
         # If matching is needed, uncomment the following code and return this
         # matching = list(zip(row_ind, col_ind))
 
-        return loss
+        return torch.stack(losses).mean()
