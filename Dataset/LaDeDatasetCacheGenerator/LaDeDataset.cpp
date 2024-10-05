@@ -59,7 +59,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> LaDeDataset::get() {
 
     Tensor graph_tensor = graph.toTensor(this->max_segs_per_graph);
 
-    Tensor heatmap = this->getHeatmap(graph_tensor, trajs, 128, 128);
+    Tensor heatmap = this->getHeatmap(graph_tensor, trajs, 64, 64);
 
     return std::make_tuple(trajs, paths, graph_tensor, heatmap);
 }
