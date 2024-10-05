@@ -21,6 +21,8 @@ class DDPM:
         else:
             betas = torch.linspace(min_beta, max_beta, max_diffusion_step).to(device)
 
+        self.device = device
+
         alphas = 1 - betas
         alpha_bars = torch.empty_like(alphas)
         product = 1
@@ -58,9 +60,10 @@ class DDPM:
         :param scaling_factor: scaling factor of noise
         :return: x_t-1: output images (B, C, L)
         """
-        beta = self.b[t].view(-1, 1, 1)
-        alpha = self.a[t].view(-1, 1, 1)
-        sqrt_1_minus_alpha_bar = self.sqrt_1_m_abar[t].view(-1, 1, 1)
+        sample_dims = x_tp1.dim() - 1
+        beta = self.b[t].view(-1, *([1] * sample_dims))
+        alpha = self.a[t].view(-1, *([1] * sample_dims))
+        sqrt_1_minus_alpha_bar = self.sqrt_1_m_abar[t].view(-1, *([1] * sample_dims))
 
         mu = (x_tp1 - beta / sqrt_1_minus_alpha_bar * epsilon_pred) / torch.sqrt(alpha)
 
@@ -72,8 +75,9 @@ class DDPM:
 
     @torch.no_grad()
     def diffusionBackward(self,
-                          unet: torch.nn.Module,
-                          x_T, traj_encoding, verbose=False):
+                          noises: List[Tensor],
+                          pred_func: Callable,
+                          verbose=False):
         """
         Backward Diffusion Process
         :param unet: UNet
@@ -83,13 +87,14 @@ class DDPM:
         :param mask: mask (B, 1, L), 1 for erased, 0 for not erased, -1 for padding
         :param query_len: query length (B, )
         """
-        B = x_T.shape[0]
-        x_t = x_T.clone()
-        tensor_t = torch.arange(self.T, dtype=torch.long, device=x_T.device).repeat(B, 1)  # (B, T)
+        B = noises[0].shape[0]
+        content_list = [noise.clone() for noise in noises]
+        tensor_t = torch.arange(self.T, dtype=torch.long, device=self.device).repeat(B, 1)  # (B, T)
         pbar = tqdm(range(self.T - 1, -1, -1)) if verbose else range(self.T - 1, -1, -1)
         for t in pbar:
-            eps_pred = unet(x_t, traj_encoding, tensor_t[:, t])
+            noise_preds = pred_func(content_list, tensor_t[:, t])
 
-            x_t = self.diffusionBackwardStep(x_t, t, eps_pred)
+            for i in range(len(content_list)):
+                content_list[i] = self.diffusionBackwardStep(content_list[i], t, noise_preds[i])
 
-        return x_t
+        return content_list
