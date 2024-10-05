@@ -20,9 +20,7 @@ def train():
 
     torch.autograd.set_detect_anomaly(True)
 
-    prefix = "./Dataset/Shanghai_Cached_"
-    dataset = LaDeCachedDataset(prefix + "graphs.pth", prefix + "heatmaps.pth", prefix + "trajs.pth")
-
+    dataset = LaDeCachedDataset("./Dataset/Shanghai_5k")
 
     dataloader = DataLoader(dataset, batch_size=20, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn)
 
