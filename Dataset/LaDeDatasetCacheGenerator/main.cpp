@@ -61,10 +61,10 @@ int main(int argc, char const *argv[]) {
     }
     std::cout << std::endl;
 
-    saveTensors(trajs, "./Shanghai_Cached_trajs.pth");          // Each element: (64, 128, 2)
-    saveTensors(paths, "./Shanghai_Cached_paths.pth");          // Each element: (64, 11, 2)
-    saveTensors(graphs, "./Shanghai_Cached_graphs.pth");        // Each element: (64, 2, 2)
-    saveTensors(heatmaps, "./Shanghai_Cached_heatmaps.pth");    // Each element: (2, 64, 64)
+    saveTensors(trajs, "./trajs.pth");          // Each element: (64, 128, 2)
+    saveTensors(paths, "./paths.pth");          // Each element: (64, 11, 2)
+    saveTensors(graphs, "./graphs.pth");        // Each element: (64, 2, 2)
+    saveTensors(heatmaps, "./heatmaps.pth");    // Each element: (2, 64, 64)
     
     return 0;
 }

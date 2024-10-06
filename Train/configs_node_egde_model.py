@@ -14,7 +14,7 @@ from typing import List
 from Dataset import DEVICE, LaDeCachedDataset
 from Models import DiffusionNetwork, TrajAutoEncoder
 from Diffusion import DDPM
-from Utils import loadModels, saveModels, MovingAvg, PlotManager
+from Train.Utils import loadModels, saveModels, MovingAvg, PlotManager
 
 # Dataset & Model Parameters
 DATA_DIR = "./Dataset/Shanghai_5k"
