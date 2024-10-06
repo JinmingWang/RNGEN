@@ -116,9 +116,8 @@ class PlotManager:
         valid_mask = nodes[:, 2].bool()
         valid_nodes = nodes[valid_mask]
 
-        # No nedd to plot nodes, because they are plotted when plotting edges
-        # ax.scatter(valid_nodes[:, 0].cpu().numpy(), valid_nodes[:, 1].cpu().numpy(),
-        #            color='red', s=20, edgecolors='#63B2EE')
+        ax.scatter(valid_nodes[:, 0].cpu().numpy(), valid_nodes[:, 1].cpu().numpy(),
+                   color='#76DA91', s=20, edgecolors='#63B2EE')
 
         # Plot connections based on adjacency matrix
         adj_np = adj_mat.cpu().numpy()
@@ -129,8 +128,7 @@ class PlotManager:
                 if adj_np[i, j] == 1:
                     p1 = valid_nodes[i, :2].cpu().numpy()
                     p2 = valid_nodes[j, :2].cpu().numpy()
-                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], marker='.', linestyle='-', color='#63B2EE', markersize=10, markerfacecolor='#76DA91',
-                    lw=2)
+                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], linestyle='-', color='#63B2EE', lw=2)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])

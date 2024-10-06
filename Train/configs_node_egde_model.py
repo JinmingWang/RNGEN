@@ -34,9 +34,9 @@ LR_DIFFUSION = 1e-4
 LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 10
 LR_REDUCE_MIN = 1e-6
-EPOCHS = 100
+EPOCHS = 1000
 B = 50
-LOG_DIR = f"./Runs/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
+LOG_DIR = f"./Runs/NodeEdgeModel_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 
 # Logging Parameters
 MOV_AVG_LEN = 20

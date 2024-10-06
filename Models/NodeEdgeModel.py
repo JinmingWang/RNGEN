@@ -1,6 +1,6 @@
 from .Basics import *
 
-class Block(nn.Module):
+class NodeBlock(nn.Module):
     def __init__(self, in_c: int,
                  out_c: int,
                  traj_enc_c: int,
@@ -24,11 +24,42 @@ class Block(nn.Module):
         self.sa_2 = AttentionWithTime(in_c=out_c, head_c=out_c//4, expand_c=out_c*2, out_c=out_c,
                                       time_c=64, num_heads=self.num_heads, dropout=self.dropout)
 
-    def forward(self, x, traj_enc, t):
-        x = self.ca(x, traj_enc)
-        x = self.sa_1(x, t)
-        x = self.sa_2(x, t)
-        return x
+    def forward(self, f_nodes, traj_enc, t):
+        f_nodes = self.ca(f_nodes, traj_enc)
+        f_nodes = self.sa_1(f_nodes, t)
+        f_nodes = self.sa_2(f_nodes, t)
+
+        return f_nodes
+
+
+class EdgeBlock(nn.Module):
+    def __init__(self, node_c: int, in_c: int, out_c: int, head_c: int):
+        super().__init__()
+
+        self.in_c = in_c
+        self.out_c = out_c
+        self.head_c = head_c
+        self.scale = self.head_c ** -0.5
+
+        self.edge_proj = nn.Linear(node_c, out_c * head_c * 2)
+        self.adj_mat_proj = nn.Sequential(
+            nn.Conv2d(in_c + out_c, in_c + out_c, 1, 1, 0),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(in_c + out_c, out_c, 1, 1, 0),
+        )
+
+    def forward(self, f_nodes, f_adj):
+        # src and dst: (B, N_nodes, out_c * head_c)
+        src, dst = self.edge_proj(f_nodes).split(self.out_c * self.head_c, dim=-1)
+        src = rearrange(src, "B N (O C) -> (B O) N C", O=self.out_c)  # (B*O, N_nodes, C)
+        dst = rearrange(dst, "B N (O C) -> (B O) C N", O=self.out_c)  # (B*O, C, N_nodes)
+
+        # mat: (B, O, N_nodes, N_nodes)
+        mat = rearrange(src @ dst, "(B O) H W -> B O H W", O=self.out_c)  # (B, O, N_nodes, N_nodes)
+        mat = torch.cat([f_adj, mat], dim=1)
+
+        return self.adj_mat_proj(mat)   # (B, O, N_nodes, N_nodes)
+
 
 
 class DiffusionNetwork(nn.Module):
@@ -52,25 +83,17 @@ class DiffusionNetwork(nn.Module):
             AttentionBlock(in_c=64, head_c=32, expand_c=128, out_c=64, num_heads=8, dropout=0.0)
         )
 
-        self.stage_1 = Block(64, 128, traj_encoding_c, traj_num)
-
-        self.stage_2 = Block(128, 256, traj_encoding_c, traj_num)
-
-        self.stage_3 = Block(256, 512, traj_encoding_c, traj_num)
+        self.node_stage_1 = NodeBlock(64, 128, traj_encoding_c, traj_num)
+        self.edge_stage_1 = EdgeBlock(128, 1, 32, 32)
+        self.node_stage_2 = NodeBlock(128, 256, traj_encoding_c, traj_num)
+        self.edge_stage_2 = EdgeBlock(256, 32, 32, 32)
+        self.node_stage_3 = NodeBlock(256, 512, traj_encoding_c, traj_num)
+        self.edge_stage_3 = EdgeBlock(512, 32, 1, 32)
 
         self.node_head = nn.Sequential(
             nn.Linear(512, 128),
             nn.LeakyReLU(inplace=True),
             nn.Linear(128, 3)
-        )
-
-        self.edge_proj = nn.Linear(512, 512)
-        self.mat_proj = nn.Sequential(
-            nn.Linear(17, 32),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(32, 32),
-            nn.LeakyReLU(inplace=True),
-            nn.Linear(32, 1)
         )
 
     def forward(self, nodes, adj_mat, traj_encoding, t):
@@ -82,37 +105,16 @@ class DiffusionNetwork(nn.Module):
         """
         t = self.time_embed(t)  # (B, 64)
 
-        x = self.stage_0(nodes)
-        x = self.stage_1(x, traj_encoding, t)
-        x = self.stage_2(x, traj_encoding, t)
-        x = self.stage_3(x, traj_encoding, t)
+        f_nodes = self.stage_0(nodes)
+        f_edges = adj_mat.unsqueeze(1)  # (B, 1, N_nodes, N_nodes)
 
-        # x: (B, N_nodes, 512)
-        node_eps = self.node_head(x)    # (B, N_nodes, 2)
+        f_nodes = self.node_stage_1(f_nodes, traj_encoding, t)
+        f_edges = self.edge_stage_1(f_nodes, f_edges)
 
-        src, dst = self.edge_proj(x).split(256, dim=-1)    # (B, N_nodes, 256), (B, N_nodes, 256)
-        src = rearrange(src, "B N (H C) -> (B H) N C", H=16)     # (B*16, N_nodes, 16)
-        dst = rearrange(dst, "B N (H C) -> (B H) C N", H=16)     # (B*16, 16, N_nodes)
-        mat = rearrange(src @ dst, "(B C) H W -> B H W C", C=16)     # (B, 16, N_nodes, N_nodes)
+        f_nodes = self.node_stage_2(f_nodes, traj_encoding, t)
+        f_edges = self.edge_stage_2(f_nodes, f_edges)
 
-        mat = torch.cat([adj_mat.unsqueeze(-1), mat], dim=-1)    # (B, N_nodes, N_nodes, 17)
-        adj_mat_eps = self.mat_proj(mat).squeeze(-1)    # (B, N_nodes, N_nodes)
+        f_nodes = self.node_stage_3(f_nodes, traj_encoding, t)
+        f_edges = self.edge_stage_3(f_nodes, f_edges)
 
-        return node_eps, adj_mat_eps
-
-
-    def trainStep(self, optimizer, encoder, **data):
-        optimizer.zero_grad()
-
-        traj_enc = encoder(data['trajs'])
-
-        reconstruct_trajs = self()
-        loss_list = []
-        B = len(data['trajs'])
-        for b in range(B):
-            N = data['trajs'][b].shape[0]
-            loss_list.append(self.loss_func(reconstruct_trajs[b, :N], data['trajs'][b]))
-        loss = torch.stack(loss_list).mean()
-        loss.backward()
-        optimizer.step()
-        return loss.item(), reconstruct_trajs
+        return self.node_head(f_nodes), f_edges.squeeze(1)
