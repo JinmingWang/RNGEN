@@ -29,6 +29,9 @@ class AttentionBlock(nn.Module):
 
         self.merge_head_proj = nn.Linear(in_c * self.H, in_c)
 
+        torch.nn.init.zeros_(self.merge_head_proj.weight)
+        torch.nn.init.zeros_(self.merge_head_proj.bias)
+
         self.ff = nn.Sequential(
             nn.LayerNorm(in_c),
             nn.Linear(in_c, expand_c),
@@ -36,6 +39,9 @@ class AttentionBlock(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(expand_c, out_c),
         )
+
+        torch.nn.init.zeros_(self.ff[-1].weight)
+        torch.nn.init.zeros_(self.ff[-1].bias)
 
         self.shortcut = nn.Linear(in_c, out_c) if in_c != out_c else nn.Identity()
 
@@ -189,10 +195,10 @@ class Res2D(nn.Module):
 
         self.layers = nn.Sequential(
             nn.Conv2d(in_c, in_c * 2, 3, 1, 1),
-            nn.InstanceNorm2d(in_c * 2),
+            nn.BatchNorm2d(in_c * 2),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(in_c * 2, in_c * 2, 3, 1, 1),
-            nn.InstanceNorm2d(in_c * 2),
+            nn.BatchNorm2d(in_c * 2),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(in_c * 2, out_c, 3, 1, 1)
         )
