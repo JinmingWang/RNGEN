@@ -34,8 +34,19 @@ int main(int argc, char const *argv[]) {
     int count_w = std::to_string(count).length();
 
     std::string path = "processed.pt";
+    int graph_depth = 5;
+    int trajs_per_graph = 64;
+    int max_segs_per_graph = 64;
+    bool rotation = true;
+    float scaling_range = 0.2;
+    float traj_step_mean = 0.3;
+    float traj_step_std = 0.15;
+    float traj_noise_std = 0.07;
+    float traj_len = 64;
+
     // Easy
-    LaDeDataset dataset(path, 5, 64, 64, true, 0.2f, 0.3f, 0.15f, 0.05f, 64);
+    LaDeDataset dataset(path, graph_depth, trajs_per_graph, max_segs_per_graph, rotation,
+                        scaling_range, traj_step_mean, traj_step_std, traj_noise_std, traj_len);
     vector<Tensor> trajs;
     vector<Tensor> paths;
     vector<Tensor> graphs;

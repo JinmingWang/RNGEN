@@ -45,9 +45,9 @@ LaDeDataset::LaDeDataset(std::string path,
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> LaDeDataset::get() {
     SegmentGraph graph = this->getGraph();
-    // Tensor angle = this->rotation ? torch::rand({1}, DEVICE) * 2.0 * M_PI : torch::zeros({1}, DEVICE);
-    // Tensor scale = torch::rand({1}, DEVICE) * (this->scaling_range * 2.0) - this->scaling_range + 1.0;
-    // graph.transform(angle, scale);
+    Tensor angle = this->rotation ? torch::rand({1}, DEVICE) * 2.0 * M_PI : torch::zeros({1}, DEVICE);
+    Tensor scale = torch::rand({1}, DEVICE) * (this->scaling_range * 2.0) - this->scaling_range + 1.0;
+    graph.transform(angle, scale);
     graph.normalize();
 
     // graph.draw("#000000");
