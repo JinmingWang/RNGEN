@@ -69,8 +69,8 @@ class PlotManager:
 
         # Extract the points for each trajectory
         for traj in trajs:
-            x = traj[:, 0].cpu().numpy()  # X coordinates
-            y = traj[:, 1].cpu().numpy()  # Y coordinates
+            x = traj[:, 0].cpu().detach().numpy()  # X coordinates
+            y = traj[:, 1].cpu().detach().numpy()  # Y coordinates
             ax.plot(x, y, marker='.', linestyle='-', color='#F8CB7F', markersize=5, alpha=0.3,
                     markerfacecolor='red', lw=1)
 
@@ -140,6 +140,9 @@ class PlotManager:
     def show(self):
         plt.tight_layout()
         plt.show()
+
+    def save(self, path: str):
+        plt.savefig(path, dpi=200)
 
     def getFigure(self):
         """Return the figure object, which can be used for TensorBoard SummaryWriter."""
