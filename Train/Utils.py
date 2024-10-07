@@ -27,6 +27,22 @@ def saveModels(path: str, *models: torch.nn.Module) -> None:
         state_dicts[model.__class__.__name__] = model.state_dict()
     torch.save(state_dicts, path)
 
+
+def setPaddingToZero(lengths: torch.Tensor, sequence: torch.Tensor = None, adj_mat: torch.Tensor = None):
+    B = lengths.shape[0]
+    if sequence is not None:
+        for b in range(B):
+            sequence[b, lengths[b]:] = 0
+        return sequence
+    elif adj_mat is not None:
+        for b in range(B):
+            adj_mat[b, lengths[b]:, :] = 0
+            adj_mat[b, :, lengths[b]:] = 0
+        return adj_mat
+    else:
+        raise Exception("Either sequence or adj_mat must be provided")
+
+
 class PlotManager:
     def __init__(self, cell_size, grid_rows, grid_cols):
         self.cell_size = cell_size
@@ -112,9 +128,7 @@ class PlotManager:
         ax.clear()  # Clear previous content
         ax.set_title(title, fontsize=14, color='darkblue')
 
-        # Extract valid nodes (where is_valid_node == 1)
-        valid_mask = nodes[:, 2].bool()
-        valid_nodes = nodes[valid_mask]
+        valid_nodes = nodes
 
         ax.scatter(valid_nodes[:, 0].cpu().numpy(), valid_nodes[:, 1].cpu().numpy(),
                    color='#76DA91', s=20, edgecolors='#63B2EE')
@@ -128,7 +142,7 @@ class PlotManager:
                 if adj_np[i, j] == 1:
                     p1 = valid_nodes[i, :2].cpu().numpy()
                     p2 = valid_nodes[j, :2].cpu().numpy()
-                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], linestyle='-', color='#63B2EE', lw=2)
+                    ax.plot([p1[0], p2[0]], [p1[1], p2[1]], linestyle='-', color='#63B2EE', lw=1)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])

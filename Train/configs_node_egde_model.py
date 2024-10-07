@@ -12,9 +12,9 @@ import os
 from typing import List
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import DiffusionNetwork, Encoder
+from Models import DiffusionNetwork, Encoder, HungarianLoss
 from Diffusion import DDPM
-from Train.Utils import loadModels, saveModels, MovingAvg, PlotManager
+from Train.Utils import loadModels, saveModels, MovingAvg, PlotManager, setPaddingToZero
 
 # Dataset & Model Parameters
 DATA_DIR = "./Dataset/Shanghai_5k"
@@ -31,13 +31,13 @@ T = 500
 LR_ENCODER = 1e-5
 LR_DIFFUSION = 1e-4
 LR_REDUCE_FACTOR = 0.5
-LR_REDUCE_PATIENCE = 10
-LR_REDUCE_MIN = 1e-6
+LR_REDUCE_PATIENCE = 20
+LR_REDUCE_MIN = 1e-7
 EPOCHS = 1000
 B = 100
 LOG_DIR = f"./Runs/NodeEdgeModel_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 
 # Logging Parameters
-MOV_AVG_LEN = 20
+MOV_AVG_LEN = 400
 LOG_INTERVAL = 2
-PLOT_INTERVAL = 50
+EVAL_INTERVAL = 200
