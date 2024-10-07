@@ -102,10 +102,11 @@ class LaDeCachedDataset(Dataset):
 
 
     @staticmethod
-    def SegmentsToNodesAdj(graphs, nodes_pad_len):
+    def SegmentsToNodesAdj(graphs: Tensor, nodes_pad_len: int) -> Tuple[Tensor, ...]:
         B, N, _, _ = graphs.shape  # B: batch size, N: number of line segments
         nodes_padded = []
         adj_padded = []
+        nodes_counts = []
 
         for i in range(B):
             graph = graphs[i]  # Shape: (N, 2, 2)
@@ -115,6 +116,8 @@ class LaDeCachedDataset(Dataset):
             # Extract unique nodes (2D points)
             unique_nodes, inverse_indices = torch.unique(points, dim=0, return_inverse=True)
             num_nodes = unique_nodes.shape[0]
+
+            nodes_counts.append(num_nodes)
 
             # Create node tensor with an additional channel indicating if it's a valid node or padding
             # Shape: (nodes_pad_len, 3) -> (x, y, is_valid_node)
@@ -140,6 +143,7 @@ class LaDeCachedDataset(Dataset):
         # Convert lists to tensors using torch.stack
         nodes_padded_tensor = torch.stack(nodes_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, 3)
         adj_padded_tensor = torch.stack(adj_padded).to(torch.float32).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len)
+        nodes_count_tensor = torch.tensor(nodes_counts, dtype=torch.long, device=DEVICE)
 
-        return nodes_padded_tensor, adj_padded_tensor
+        return nodes_padded_tensor, adj_padded_tensor, nodes_count_tensor
 
