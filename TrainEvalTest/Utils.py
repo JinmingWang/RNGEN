@@ -56,8 +56,8 @@ def setPaddingToZero(lengths: torch.Tensor, sequences: List[Tensor]=None, matric
 
     for i in range(len(matrices)):
         for b in range(B):
-            matrices[b, lengths[b]:, :] = 0
-            matrices[b, :, lengths[b]:] = 0
+            matrices[i][b, lengths[b]:, :] = 0
+            matrices[i][b, :, lengths[b]:] = 0
 
 
 class PlotManager:
@@ -231,12 +231,12 @@ class ProgressManager:
         self.overall_progress += 1
 
         # Update the specific epoch progress
-        self.epoch_progress[current_epoch - 1]["completed"] = current_step
+        self.epoch_progress[current_epoch]["completed"] = current_step + 1
         for k in self.custom_fields:
-            self.epoch_progress[current_epoch - 1][k] = custom_values[k]
+            self.epoch_progress[current_epoch][k] = custom_values[k]
 
-        self.current_epoch = current_epoch
-        self.current_step = current_step
+        self.current_epoch = current_epoch + 1
+        self.current_step = current_step + 1
 
     def format_time(self, seconds: float) -> str:
         """Format time in seconds into hh:mm:ss."""

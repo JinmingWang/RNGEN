@@ -90,7 +90,7 @@ def train():
                 global_step += 1
                 mov_avg_loss.update(loss)
 
-                progress.update(e+1, i, loss=mov_avg_loss.get(), lr=optimizer.param_groups[0]['lr'])
+                progress.update(e, i, loss=mov_avg_loss.get(), lr=optimizer.param_groups[0]['lr'])
 
                 if global_step % LOG_INTERVAL == 0:
                     writer.add_scalar("loss", mov_avg_loss.get(), global_step)
