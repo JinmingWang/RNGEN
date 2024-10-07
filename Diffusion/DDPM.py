@@ -51,7 +51,7 @@ class DDPM:
         # t: 0 - T-1
         return torch.sqrt(self.a[t]) * x_t + torch.sqrt(1 - self.a[t]) * eps_t_to_tp1
 
-    def diffusionBackwardStep(self, x_tp1: torch.Tensor, t: int, epsilon_pred: torch.Tensor):
+    def diffusionBackwardStep(self, x_tp1: torch.Tensor, t: int, epsilon_pred: torch.Tensor, disable_noise: bool = False):
         """
         Backward Diffusion Process
         :param x_t: input images (B, C, L)
@@ -60,6 +60,9 @@ class DDPM:
         :param scaling_factor: scaling factor of noise
         :return: x_t-1: output images (B, C, L)
         """
+        if isinstance(t, int):
+            t = torch.tensor(t).to(x_tp1.device)
+
         sample_dims = x_tp1.dim() - 1
         beta = self.b[t].view(-1, *([1] * sample_dims))
         alpha = self.a[t].view(-1, *([1] * sample_dims))
@@ -67,11 +70,13 @@ class DDPM:
 
         mu = (x_tp1 - beta / sqrt_1_minus_alpha_bar * epsilon_pred) / torch.sqrt(alpha)
 
-        if t <= 5:
+        if disable_noise:
             return mu
-        else:
-            stds = torch.sqrt((1 - self.abar[t - 1]) / (1 - self.abar[t]) * beta) * torch.randn_like(x_tp1) * 0.2
-            return mu + stds
+
+        stds = torch.sqrt((1 - self.abar[t - 1]) / (1 - self.abar[t]) * beta) * torch.randn_like(x_tp1) * 0.2
+        stds = stds * (t.view(-1, *([1] * sample_dims)) > 5).to(torch.long)
+
+        return mu + stds
 
     @torch.no_grad()
     def diffusionBackward(self,
