@@ -45,7 +45,7 @@ class HungarianLoss(nn.Module):
             row_ind, col_ind = linear_sum_assignment(cost_matrix[b])
 
             # Step 3: Compute loss for matched pairs
-            losses.append(self.base_loss(pred[row_ind], target[col_ind]))
+            losses.append(self.base_loss(pred[b][row_ind], target[b][col_ind]))
 
         # Step 4: Compute penalty for unmatched items
         # However, since both sequences have the same length, there should be no unmatched items

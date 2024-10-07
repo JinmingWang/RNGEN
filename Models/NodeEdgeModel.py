@@ -17,18 +17,20 @@ class NodeBlock(nn.Module):
         self.num_heads = num_heads
         self.dropout = dropout
 
-        self.ca = CrossAttentionBlock(in_c=in_c, context_c=traj_enc_c, head_c=in_c//4, expand_c=out_c,
+        self.ca_1 = CrossAttentionBlock(in_c=in_c, context_c=traj_enc_c, head_c=in_c//4, expand_c=out_c*2,
                                       out_c=out_c, num_heads=self.num_heads, dropout=self.dropout)
         self.sa_1 = AttentionWithTime(in_c=out_c, head_c=out_c//4, expand_c=out_c*2, out_c=out_c,
                                       time_c=64, num_heads=self.num_heads, dropout=self.dropout)
+        self.ca_2 = CrossAttentionBlock(in_c=out_c, context_c=traj_enc_c, head_c=out_c // 4, expand_c=out_c*2,
+                                      out_c=out_c, num_heads=self.num_heads, dropout=self.dropout)
         self.sa_2 = AttentionWithTime(in_c=out_c, head_c=out_c//4, expand_c=out_c*2, out_c=out_c,
                                       time_c=64, num_heads=self.num_heads, dropout=self.dropout)
 
     def forward(self, f_nodes, traj_enc, t):
-        f_nodes = self.ca(f_nodes, traj_enc)
+        f_nodes = self.ca_1(f_nodes, traj_enc)
         f_nodes = self.sa_1(f_nodes, t)
+        f_nodes = self.ca_2(f_nodes, traj_enc)
         f_nodes = self.sa_2(f_nodes, t)
-
         return f_nodes
 
 
@@ -79,7 +81,7 @@ class DiffusionNetwork(nn.Module):
         )
 
         self.stage_0 = nn.Sequential(
-            nn.Linear(3, 64),
+            nn.Linear(2, 64),
             AttentionBlock(in_c=64, head_c=32, expand_c=128, out_c=64, num_heads=8, dropout=0.0)
         )
 
@@ -93,12 +95,12 @@ class DiffusionNetwork(nn.Module):
         self.node_head = nn.Sequential(
             nn.Linear(512, 128),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(128, 3)
+            nn.Linear(128, 2)
         )
 
     def forward(self, nodes, adj_mat, traj_encoding, t):
         """
-        :param nodes: (B, N_nodes, 3), 3 for lng, lat, pad_flag
+        :param nodes: (B, N_nodes, 2), 3 for lng, lat
         :param adj_mat: (B, N_nodes, N_nodes)
         :param traj_encoding: (B, N_traj=32, traj_encoding_c=128)
         :return:
