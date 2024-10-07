@@ -121,9 +121,8 @@ class LaDeCachedDataset(Dataset):
 
             # Create node tensor with an additional channel indicating if it's a valid node or padding
             # Shape: (nodes_pad_len, 3) -> (x, y, is_valid_node)
-            node_tensor = torch.zeros((nodes_pad_len, 3))
-            node_tensor[:num_nodes, :2] = unique_nodes  # Assign unique nodes
-            node_tensor[:num_nodes, 2] = 1  # Mark valid nodes
+            node_tensor = torch.zeros((nodes_pad_len, 2))
+            node_tensor[:num_nodes] = unique_nodes  # Assign unique nodes
 
             nodes_padded.append(node_tensor)
 
