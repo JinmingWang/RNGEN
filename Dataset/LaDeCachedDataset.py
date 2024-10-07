@@ -91,18 +91,21 @@ class LaDeCachedDataset(Dataset):
         return (trajs, paths, graph, heatmap)
 
     @staticmethod
-    def collate_fn(batch_list: List[Tuple[Tensor, Tensor, Tensor, Tensor]]):
+    def collate_fn(batch_list: List[Tuple[Tensor, ...]]) -> Dict[str, Tensor]:
         """
         Collate function for the dataset, this function is used by DataLoader to collate a batch of samples
         :param batch_list: a list of samples
         :return: a batch of samples
         """
         trajs_list, paths_list, graph_list, heatmap_list = zip(*batch_list)
-        return torch.stack(trajs_list), torch.stack(paths_list), torch.stack(graph_list), torch.stack(heatmap_list)
+        return {"trajs": torch.stack(trajs_list),
+                "paths": torch.stack(paths_list),
+                "graphs": torch.stack(graph_list),
+                "heatmaps": torch.stack(heatmap_list)}
 
 
     @staticmethod
-    def SegmentsToNodesAdj(graphs: Tensor, nodes_pad_len: int) -> Tuple[Tensor, ...]:
+    def SegmentsToNodesAdj(graphs: Tensor, nodes_pad_len: int) -> Dict[str, Tensor]:
         B, N, _, _ = graphs.shape  # B: batch size, N: number of line segments
         nodes_padded = []
         adj_padded = []
@@ -144,5 +147,5 @@ class LaDeCachedDataset(Dataset):
         adj_padded_tensor = torch.stack(adj_padded).to(torch.float32).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len)
         nodes_count_tensor = torch.tensor(nodes_counts, dtype=torch.long, device=DEVICE)
 
-        return nodes_padded_tensor, adj_padded_tensor, nodes_count_tensor
+        return {"nodes": nodes_padded_tensor, "adj_mats": adj_padded_tensor, "n_nodes": nodes_count_tensor}
 
