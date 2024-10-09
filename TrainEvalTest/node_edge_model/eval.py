@@ -33,7 +33,7 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: DiffusionNet
     plot_manager = PlotManager(5, 2, 2)
 
     plot_manager.plotNodesWithAdjMat(batch["nodes"][0], batch["adj_mats"][0], 0, 0, "Original Graph")
-    plot_manager.plotNodesWithAdjMat(nodes[0], torch.zeros_like(adj_mat[0]), 0, 1, "Reconstructed Graph")
+    plot_manager.plotNodesWithAdjMat(nodes[0], adj_mat[0], 0, 1, "Reconstructed Graph")
     plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
 
     encoder.train()

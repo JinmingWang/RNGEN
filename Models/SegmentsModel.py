@@ -18,12 +18,12 @@ class Block(nn.Module):
         self.num_heads = num_heads
         self.dropout = dropout
 
-        self.ca = CrossAttentionBlock(in_c=in_c, context_c=traj_enc_c, head_c=in_c//4, expand_c=out_c,
-                                      out_c=out_c, num_heads=self.num_heads, dropout=self.dropout)
-        self.sa_1 = AttentionBlock(in_c=out_c, head_c=out_c//4, expand_c=out_c*2, out_c=out_c,
-                                   num_heads=self.num_heads, dropout=self.dropout)
-        self.sa_2 = AttentionBlock(in_c=out_c, head_c=out_c//4, expand_c=out_c*2, out_c=out_c,
-                                   num_heads=self.num_heads, dropout=self.dropout)
+        self.ca = CrossAttentionBlock(d_in=in_c, d_context=traj_enc_c, d_head=in_c // 4, d_expand=out_c,
+                                      d_out=out_c, n_heads=self.num_heads, dropout=self.dropout)
+        self.sa_1 = AttentionBlock(d_in=out_c, d_head=out_c // 4, d_expand=out_c * 2, d_out=out_c,
+                                   n_heads=self.num_heads, dropout=self.dropout)
+        self.sa_2 = AttentionBlock(d_in=out_c, d_head=out_c // 4, d_expand=out_c * 2, d_out=out_c,
+                                   n_heads=self.num_heads, dropout=self.dropout)
 
     def forward(self, x, traj_enc):
         x = self.ca(x, traj_enc)
@@ -43,8 +43,8 @@ class DiffusionNetwork(nn.Module):
 
         self.stage_0 = nn.Sequential(
             nn.Linear(segment_c, 64),
-            AttentionBlock(in_c=64, head_c=32, expand_c=128, out_c=64, num_heads=8, dropout=0.0),
-            AttentionBlock(in_c=64, head_c=32, expand_c=128, out_c=64, num_heads=8, dropout=0.0)
+            AttentionBlock(d_in=64, d_head=32, d_expand=128, d_out=64, n_heads=8, dropout=0.0),
+            AttentionBlock(d_in=64, d_head=32, d_expand=128, d_out=64, n_heads=8, dropout=0.0)
         )
 
         self.stage_1 = Block(64, 128, traj_encoding_c, traj_num)
