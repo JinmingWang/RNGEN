@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.node_edge_model.configs import *
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss, DiffusionNet, Encoder
+from Models import HungarianLoss_SeqMat, DiffusionNet, Encoder
 from Diffusion import DDPM
 
 import torch
@@ -46,7 +46,7 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: DiffusionNet
         valid_nodes.append(nodes[b, :, :2][valid_mask[b]])
         valid_adj_mat.append(adj_mat[b][valid_mask[b]][:, valid_mask[b]])
 
-    node_loss, edge_loss = HungarianLoss()(nodes, batch["nodes"], adj_mat, batch["adj_mats"])
+    node_loss, edge_loss = HungarianLoss_SeqMat()(nodes, batch["nodes"], adj_mat, batch["adj_mats"])
 
     plot_manager = PlotManager(5, 2, 2)
 

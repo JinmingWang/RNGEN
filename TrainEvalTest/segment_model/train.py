@@ -1,7 +1,7 @@
 from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.node_edge_model.configs import *
+from TrainEvalTest.segment_model.configs import *
 from TrainEvalTest.Utils import *
-from TrainEvalTest.node_edge_model.eval import eval
+from TrainEvalTest.segment_model.eval import eval
 
 import torch
 from torch.optim import AdamW
@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import NodeEdgeModel, Encoder, HungarianLoss_SeqMat
+from Models import SegmentsModel, Encoder, HungarianLoss_Sequential
 from Diffusion import DDPM
 
 
@@ -23,11 +23,11 @@ def train():
 
     # Models
     encoder = Encoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
-    diffusion_net = NodeEdgeModel(n_nodes=N_NODES, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
+    diffusion_net = SegmentsModel(n_seg=N_SEGS, d_seg=5, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss_SeqMat('l1')
+    loss_func = HungarianLoss_Sequential('l1')
 
     # Optimizer & Scheduler
     optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
@@ -37,47 +37,40 @@ def train():
     # Prepare Logging
     os.makedirs(LOG_DIR)
     writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_node_loss = MovingAvg(MOV_AVG_LEN)
-    mov_avg_mat_loss = MovingAvg(MOV_AVG_LEN)
+    mov_avg_loss = MovingAvg(MOV_AVG_LEN)
     global_step = 0
     best_loss = float("inf")
 
-    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["NodeLoss", "MatLoss", "lr"]) as progress:
+    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
 
-                batch |= LaDeCachedDataset.SegmentsToNodesAdj(batch["graphs"], N_NODES)
+                # count number of non-zero tokens for each batch graph
+                segments = batch["graphs"].flatten(2)   # (B, G, 2, 2) -> (B, G, 4)
+                valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
+                # add a dimension for segments indicating if it's a valid segment or padding
+                segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
+                batch["segs"] = segments
 
-                node_noise = torch.randn_like(batch["nodes"])
-                adj_mat_noise = torch.randn_like(batch["adj_mats"])
-                # setPaddingToZero(batch["n_nodes"], [node_noise], [adj_mat_noise])
+                noise = torch.randn_like(batch["segs"])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
-                noisy_nodes = ddpm.diffusionForward(batch["nodes"], t, node_noise)
-                noisy_adj_mat = ddpm.diffusionForward(batch["adj_mats"], t, adj_mat_noise)
+                noisy_segs = ddpm.diffusionForward(batch["segs"], t, noise)
 
                 s = t - 1
-                less_noisy_nodes = torch.zeros_like(noisy_nodes)
-                less_noisy_nodes[t!=0] = ddpm.diffusionForward(batch["nodes"][t!=0], s[t!=0], node_noise[t!=0])
-                less_noisy_nodes[t==0] = batch["nodes"][t==0]
-
-                less_noisy_adj_mat = torch.zeros_like(noisy_adj_mat)
-                less_noisy_adj_mat[t!=0] = ddpm.diffusionForward(batch["adj_mats"][t!=0], s[t!=0], adj_mat_noise[t!=0])
-                less_noisy_adj_mat[t==0] = batch["adj_mats"][t==0]
+                less_noisy_segs = torch.zeros_like(noisy_segs)
+                less_noisy_segs[t!=0] = ddpm.diffusionForward(batch["segs"][t!=0], s[t!=0], noise[t!=0])
+                less_noisy_segs[t==0] = batch["segs"][t==0]
 
                 optimizer.zero_grad()
                 traj_enc = encoder(batch["trajs"])
-                pred_node_noise, pred_adj_mat_noise = diffusion_net(noisy_nodes, noisy_adj_mat, traj_enc, t)
-                # setPaddingToZero(batch["n_nodes"], [pred_node_noise], [pred_adj_mat_noise])
+                pred_noise = diffusion_net(noisy_segs, traj_enc, t)
 
-                pred_node = ddpm.diffusionBackwardStep(noisy_nodes, t, pred_node_noise, disable_noise=True)
-                pred_adj_mat = ddpm.diffusionBackwardStep(noisy_adj_mat, t, pred_adj_mat_noise, disable_noise=True)
+                pred_segs = ddpm.diffusionBackwardStep(noisy_segs, t, pred_noise, disable_noise=True)
 
-                node_loss, adj_mat_loss = loss_func(pred_node, less_noisy_nodes, pred_adj_mat, less_noisy_adj_mat)
-
-                loss = node_loss + adj_mat_loss
+                loss = loss_func(pred_segs, less_noisy_segs)
 
                 loss.backward()
 
@@ -89,14 +82,12 @@ def train():
 
                 total_loss += loss.item()
                 global_step += 1
-                mov_avg_node_loss.update(node_loss)
-                mov_avg_mat_loss.update(adj_mat_loss)
+                mov_avg_loss.update(loss)
 
-                progress.update(e, i, NodeLoss=mov_avg_node_loss.get(), MatLoss=mov_avg_mat_loss.get(), lr=optimizer.param_groups[0]['lr'])
+                progress.update(e, i, Loss=mov_avg_loss.get(), lr=optimizer.param_groups[0]['lr'])
 
                 if global_step % LOG_INTERVAL == 0:
-                    writer.add_scalar("loss/nodes", mov_avg_node_loss.get(), global_step)
-                    writer.add_scalar("loss/adj_mat", mov_avg_mat_loss.get(), global_step)
+                    writer.add_scalar("loss/Loss", mov_avg_loss.get(), global_step)
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
                 if global_step % EVAL_INTERVAL == 0:

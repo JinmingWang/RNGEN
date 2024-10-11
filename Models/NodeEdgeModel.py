@@ -64,7 +64,7 @@ class EdgeBlock(nn.Module):
 
 
 
-class DiffusionNetwork(nn.Module):
+class NodeEdgeModel(nn.Module):
     def __init__(self, n_nodes: int, d_traj_enc: int, n_traj: int, T: int):
         super().__init__()
 

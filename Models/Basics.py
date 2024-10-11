@@ -243,3 +243,10 @@ class Conv1dBnAct(nn.Sequential):
             nn.BatchNorm1d(d_out),
             nn.LeakyReLU(inplace=True)
         )
+
+
+class SequentialWithAdditionalInputs(nn.Sequential):
+    def forward(self, x, *args):
+        for module in self:
+            x = module(x, *args)
+        return x
