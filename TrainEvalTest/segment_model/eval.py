@@ -29,7 +29,7 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
             noise_pred = diffusion_net(*noisy_contents, traj_enc, t)
             return [noise_pred]
 
-        segs = ddpm.diffusionBackward([noise], pred_func)
+        segs = ddpm.diffusionBackward([noise], pred_func)[0]
 
     # Remove padding nodes
     valid_mask = segs[:, :, -1] >= 0.5
@@ -45,7 +45,7 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
 
     # Plot reconstructed graph
     plot_manager.plotSegments(batch["graphs"][0], 0, 0, "Ground Truth")
-    plot_manager.plotNodesWithAdjMat(valid_segs[0].reshape(-1, 2, 2), 0, 1, "Reconstructed")
+    plot_manager.plotSegments(valid_segs[0].reshape(-1, 2, 2), 0, 1, "Reconstructed")
     plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
 
     encoder.train()

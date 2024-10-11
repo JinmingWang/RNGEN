@@ -29,7 +29,7 @@ class HungarianLoss(nn.Module):
         super(HungarianLoss, self).__init__()
         self.base_loss = nn.MSELoss() if base_loss == 'mse' else nn.L1Loss()
 
-    def forward(self, pred_nodes, target_nodes, pred_adj, target_adj):
+    def forward(self, pred_nodes, target_nodes):
         B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
         losses = []
 
