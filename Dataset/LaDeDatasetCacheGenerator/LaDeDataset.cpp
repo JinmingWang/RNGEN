@@ -150,6 +150,8 @@ Tensor LaDeDataset::simulateTraj(Tensor &visiting_nodes) {
 
     while ((walked_dist < distances[-1]).item<bool>()) {
         Tensor next_step_dist = torch::normal(this->traj_step_mean, this->traj_step_std, {1}).to(DEVICE);
+        // the distance cannot be negative
+        next_step_dist = torch::nn::functional::relu(next_step_dist);
         walked_dist += next_step_dist;
         // Find the position of the walker along the path
         for (int i = 0; i < distances.size(0) - 1; i++) {
