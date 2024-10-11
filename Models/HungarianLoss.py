@@ -29,28 +29,33 @@ class HungarianLoss(nn.Module):
         super(HungarianLoss, self).__init__()
         self.base_loss = nn.MSELoss() if base_loss == 'mse' else nn.L1Loss()
 
-    def forward(self, pred, target):
-        """ Compute Hungarian loss between pred and target tokens
-
-        :param pred: Predicted tokens of shape (B, N, D)
-        :param target: Target tokens of shape (B, N, D)
-        """
-        B = pred.shape[0]
-        # Step 1: Compute pairwise distance matrix (L2 distance)
-        cost_matrix = torch.cdist(pred, target, p=2).cpu().detach().numpy()  # (B, N, N)
-
+    def forward(self, pred_nodes, target_nodes, pred_adj, target_adj):
+        B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
         losses = []
+        edge_losses = []
+
         for b in range(B):
-            # Step 2: Apply Hungarian algorithm
-            row_ind, col_ind = linear_sum_assignment(cost_matrix[b])
+            # Step 1: Compute pairwise distance matrix (L2 distance) between nodes
+            cost_matrix = torch.cdist(pred_nodes[b], target_nodes[b], p=2).cpu().detach().numpy()  # (N, N)
 
-            # Step 3: Compute loss for matched pairs
-            losses.append(self.base_loss(pred[b][row_ind], target[b][col_ind]))
+            # Step 2: Apply Hungarian algorithm to find best node matches
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
-        # Step 4: Compute penalty for unmatched items
-        # However, since both sequences have the same length, there should be no unmatched items
+            # Step 3: Compute node feature loss for matched pairs
+            node_loss = self.base_loss(pred_nodes[b][row_ind], target_nodes[b][col_ind])
+            losses.append(node_loss)
 
-        # If matching is needed, uncomment the following code and return this
-        # matching = list(zip(row_ind, col_ind))
+            if pred_adj is not None and target_adj is not None:
+                # Step 4: Reorder the adjacency matrix according to the node matching
+                pred_adj_matched = pred_adj[b][row_ind][:, row_ind]  # (N, N)
+                target_adj_matched = target_adj[b][col_ind][:, col_ind]  # (N, N)
 
-        return torch.stack(losses).mean()
+                # Step 5: Compute edge loss for the matched adjacency matrices
+                edge_loss = self.base_loss(pred_adj_matched, target_adj_matched)
+                edge_losses.append(edge_loss)
+
+        # Combine node and edge losses
+        node_loss = torch.stack(losses).sum()
+        edge_loss = torch.stack(edge_losses).sum()  # Combine edge and node losses
+
+        return node_loss, edge_loss

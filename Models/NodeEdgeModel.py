@@ -17,13 +17,13 @@ class NodeBlock(nn.Module):
         self.n_heads = n_heads
         self.dropout = dropout
 
-        self.ca_1 = CrossAttentionBlock(d_in=d_in, d_context=d_traj_enc, d_head=d_in // 4, d_expand=d_out * 2,
+        self.ca_1 = CrossAttentionBlock(d_in=d_in, d_context=d_traj_enc, d_head=d_in // 2, d_expand=d_out * 4,
                                         d_out=d_out, n_heads=self.n_heads, dropout=self.dropout)
-        self.sa_1 = AttentionWithTime(d_in=d_out, d_head=d_out // 4, d_expand=d_out * 2, d_out=d_out,
+        self.sa_1 = AttentionWithTime(d_in=d_out, d_head=d_out // 2, d_expand=d_out * 4, d_out=d_out,
                                       d_time=64, n_heads=self.n_heads, dropout=self.dropout)
-        self.ca_2 = CrossAttentionBlock(d_in=d_out, d_context=d_traj_enc, d_head=d_out // 4, d_expand=d_out * 2,
+        self.ca_2 = CrossAttentionBlock(d_in=d_out, d_context=d_traj_enc, d_head=d_out // 2, d_expand=d_out * 4,
                                         d_out=d_out, n_heads=self.n_heads, dropout=self.dropout)
-        self.sa_2 = AttentionWithTime(d_in=d_out, d_head=d_out // 4, d_expand=d_out * 2, d_out=d_out,
+        self.sa_2 = AttentionWithTime(d_in=d_out, d_head=d_out // 2, d_expand=d_out * 4, d_out=d_out,
                                       d_time=64, n_heads=self.n_heads, dropout=self.dropout)
 
     def forward(self, f_nodes, traj_enc, t):
@@ -81,21 +81,23 @@ class DiffusionNetwork(nn.Module):
         )
 
         self.stage_0 = nn.Sequential(
-            nn.Linear(2, 64),
+            nn.Linear(3, 64),
             AttentionBlock(d_in=64, d_head=32, d_expand=128, d_out=64, n_heads=8, dropout=0.0)
         )
 
         self.node_stage_1 = NodeBlock(64, 128, d_traj_enc, n_traj)
-        self.edge_stage_1 = EdgeBlock(128, 1, 32, 32)
+        self.edge_stage_1 = EdgeBlock(128, 1, 32, 64)
         self.node_stage_2 = NodeBlock(128, 256, d_traj_enc, n_traj)
-        self.edge_stage_2 = EdgeBlock(256, 32, 32, 32)
-        self.node_stage_3 = NodeBlock(256, 512, d_traj_enc, n_traj)
-        self.edge_stage_3 = EdgeBlock(512, 32, 1, 32)
+        self.edge_stage_2 = EdgeBlock(256, 32, 32, 64)
+        self.node_stage_3 = NodeBlock(256, 256, d_traj_enc, n_traj)
+        self.edge_stage_3 = EdgeBlock(256, 32, 32, 64)
+        self.node_stage_4 = NodeBlock(256, 256, d_traj_enc, n_traj)
+        self.edge_stage_4 = EdgeBlock(256, 32, 1, 64)
 
         self.node_head = nn.Sequential(
-            nn.Linear(512, 128),
+            nn.Linear(256, 128),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(128, 2)
+            nn.Linear(128, 3)
         )
 
     def forward(self, nodes, adj_mat, traj_encoding, t):
@@ -118,5 +120,8 @@ class DiffusionNetwork(nn.Module):
 
         f_nodes = self.node_stage_3(f_nodes, traj_encoding, t)
         f_edges = self.edge_stage_3(f_nodes, f_edges)
+
+        f_nodes = self.node_stage_4(f_nodes, traj_encoding, t)
+        f_edges = self.edge_stage_4(f_nodes, f_edges)
 
         return self.node_head(f_nodes), f_edges.squeeze(1)

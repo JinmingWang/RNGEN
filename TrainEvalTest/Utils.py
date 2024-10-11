@@ -204,8 +204,8 @@ class ProgressManager:
         self.current_step = 1
 
         # Initialize progress data for recent epochs
-        self.epoch_progress = [
-            ({"epoch": epoch, "completed": 0} | dict(zip(self.custom_fields, [0]*len(custom_fields))))
+        self.memory = [
+            ({"epoch": epoch, "completed": 0, "t_start": 0.0, "t_end": 0.0} | dict(zip(self.custom_fields, [0]*len(custom_fields))))
             for epoch in range(1, epochs + 1)
         ]
 
@@ -216,6 +216,7 @@ class ProgressManager:
         self.live.__enter__()
         self.live_thread = Thread(target=self.live_update)
         self.thread_stop = False
+        self.start_time = time.time()
         self.live_thread.start()
         return self
 
@@ -231,12 +232,20 @@ class ProgressManager:
         self.overall_progress += 1
 
         # Update the specific epoch progress
-        self.epoch_progress[current_epoch]["completed"] = current_step + 1
+        self.memory[current_epoch]["completed"] = current_step + 1
         for k in self.custom_fields:
-            self.epoch_progress[current_epoch][k] = custom_values[k]
+            self.memory[current_epoch][k] = custom_values[k]
 
         self.current_epoch = current_epoch + 1
         self.current_step = current_step + 1
+
+        if self.memory[current_epoch]["t_start"] == 0:
+            # we are starting a new epoch, record the start time
+            self.memory[current_epoch]["t_start"] = time.time()
+            if current_epoch >= 1:
+                # update the end time of the previous epoch
+                self.memory[current_epoch - 1]["t_end"] = time.time()
+
 
     def format_time(self, seconds: float) -> str:
         """Format time in seconds into hh:mm:ss."""
@@ -274,13 +283,19 @@ class ProgressManager:
 
         # Display the recent epochs
         for i in range(max(0, current_epoch - self.display_recent), current_epoch):
-            epoch_data = self.epoch_progress[i]
+            epoch_data = self.memory[i]
             epoch_percentage = epoch_data["completed"] / self.steps_per_epoch * 100
-            elapsed_time_epoch = elapsed_time_total * (
-                        epoch_data["completed"] / self.overall_progress) if self.overall_progress > 0 else 0
-            remaining_time_epoch = (self.steps_per_epoch - epoch_data["completed"]) * (
-                        elapsed_time_epoch / epoch_data["completed"]) if epoch_data["completed"] > 0 else 0
-            complete_color = "green" if remaining_time_epoch == 0 else "#ffff00"
+            if epoch_data["t_end"] == 0:
+                # epoch is not completed yet
+                elapsed_time_epoch = time.time() - epoch_data["t_start"]
+                remaining_time_epoch = (self.steps_per_epoch - epoch_data["completed"]) * (
+                            elapsed_time_epoch / epoch_data["completed"]) if epoch_data["completed"] > 0 else 0
+                complete_color = "green" if remaining_time_epoch == 0 else "#ffff00"
+            else:
+                # epoch is completed
+                elapsed_time_epoch = epoch_data["t_end"] - epoch_data["t_start"]
+                remaining_time_epoch = 0
+                complete_color = "green"
             table.add_row(
                 f"[{complete_color}]Epoch {epoch_data['epoch']}[/{complete_color}]",
                 f"[{complete_color}]{epoch_percentage:.2f}%[/{complete_color}]",

@@ -4,12 +4,13 @@ from datetime import datetime
 
 # Training Parameters
 LR_ENCODER = 1e-4
-LR_DIFFUSION = 1e-4
+LR_DIFFUSION = 2e-4
 LR_REDUCE_FACTOR = 0.5
-LR_REDUCE_PATIENCE = 20
+LR_REDUCE_PATIENCE = 30
 LR_REDUCE_MIN = 1e-7
+LR_REDUCE_THRESHOLD = 1e-6
 EPOCHS = 500
-B = 50
+B = 200
 LOG_DIR = f"./Runs/NodeEdgeModel/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 
 # Logging Parameters

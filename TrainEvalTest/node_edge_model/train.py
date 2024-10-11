@@ -23,7 +23,7 @@ def train():
 
     # Models
     encoder = Encoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
-    diffusion_net = DiffusionNetwork(num_nodes=N_NODES, traj_encoding_c=D_TRAJ_ENC, traj_num=N_TRAJS, T=T).to(DEVICE)
+    diffusion_net = DiffusionNetwork(n_nodes=N_NODES, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")
     # loss_func = torch.nn.MSELoss()
@@ -32,7 +32,7 @@ def train():
     # Optimizer & Scheduler
     optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
                        {"params": encoder.parameters(), "lr": LR_ENCODER}], lr=LR_DIFFUSION)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE, min_lr=LR_REDUCE_MIN)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE, min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
     # Prepare Logging
     os.makedirs(LOG_DIR)
@@ -52,7 +52,7 @@ def train():
 
                 node_noise = torch.randn_like(batch["nodes"])
                 adj_mat_noise = torch.randn_like(batch["adj_mats"])
-                setPaddingToZero(batch["n_nodes"], [node_noise], [adj_mat_noise])
+                # setPaddingToZero(batch["n_nodes"], [node_noise], [adj_mat_noise])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
                 noisy_nodes = ddpm.diffusionForward(batch["nodes"], t, node_noise)
@@ -70,21 +70,20 @@ def train():
                 optimizer.zero_grad()
                 traj_enc = encoder(batch["trajs"])
                 pred_node_noise, pred_adj_mat_noise = diffusion_net(noisy_nodes, noisy_adj_mat, traj_enc, t)
-                setPaddingToZero(batch["n_nodes"], [pred_node_noise], [pred_adj_mat_noise])
+                # setPaddingToZero(batch["n_nodes"], [pred_node_noise], [pred_adj_mat_noise])
 
                 pred_node = ddpm.diffusionBackwardStep(noisy_nodes, t, pred_node_noise, disable_noise=True)
                 pred_adj_mat = ddpm.diffusionBackwardStep(noisy_adj_mat, t, pred_adj_mat_noise, disable_noise=True)
 
-                node_loss = loss_func(pred_node, less_noisy_nodes)
-                adj_mat_loss = loss_func(pred_adj_mat, less_noisy_adj_mat)
+                node_loss, adj_mat_loss = loss_func(pred_node, less_noisy_nodes, pred_adj_mat, less_noisy_adj_mat)
 
                 loss = node_loss + adj_mat_loss
 
                 loss.backward()
 
                 # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(encoder.parameters(), 2.0)
-                torch.nn.utils.clip_grad_norm_(diffusion_net.parameters(), 2.0)
+                torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(diffusion_net.parameters(), 1.0)
 
                 optimizer.step()
 

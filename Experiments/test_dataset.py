@@ -2,21 +2,16 @@ from Dataset import *
 import matplotlib.pyplot as plt
 
 def test_LaDeDataset():
-    dataset = LaDeDataset(30)
-    graph = dataset[0]
+    dataset = LaDeCachedDataset("./Dataset/Shanghai_20k", max_trajs=32, set_name="train")
 
-    aug_graph = dataset.graphAugmentation(graph, rotation=True, scaling_range=0.2)
+    max_node_count = 0
 
-    graph.draw(color="#000000", alpha=0.5, linewidth=1, marker='o', markersize=1)
-    aug_graph.draw(color="#FF0000", alpha=0.5, linewidth=1, marker='o', markersize=1)
+    for batch in dataset:
+        n_nodes = LaDeCachedDataset.SegmentsToNodesAdj(batch[2].unsqueeze(0), 128)["n_nodes"]
 
-    plt.show()
-
-    trajs = dataset.generateTrajsFromGraph(graph, 50.0, 15.0, 10.0)
-
-    for traj in trajs:
-        visualizeTraj(traj)
-    plt.show()
+        if n_nodes.item() > max_node_count:
+            max_node_count = n_nodes.item()
+            print(max_node_count)
 
 
 
