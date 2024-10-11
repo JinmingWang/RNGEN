@@ -11,7 +11,7 @@ LR_REDUCE_MIN = 1e-7
 LR_REDUCE_THRESHOLD = 1e-6
 EPOCHS = 500
 B = 200
-LOG_DIR = f"./Runs/NodeEdgeModel/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
+LOG_DIR = f"./Runs/SegmentsModel/{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}/"
 
 # Logging Parameters
 MOV_AVG_LEN = 4*160
