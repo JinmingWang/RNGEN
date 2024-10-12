@@ -1,5 +1,5 @@
 import torch
-from Models import TrajAutoEncoder
+from Models import Encoder
 
 TAE = TrajAutoEncoder()
 

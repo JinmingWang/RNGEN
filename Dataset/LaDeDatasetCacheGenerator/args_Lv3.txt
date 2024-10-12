@@ -1,4 +1,4 @@
-count=10000
+data_count=10000
 path=processed.pt
 graph_depth=6
 trajs_per_graph=64

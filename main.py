@@ -1,4 +1,5 @@
-from TrainEvalTest.node_edge_model.train import train
+from TrainEvalTest.node_edge_model.train import train as train_node_edge
+from TrainEvalTest.segment_model.train import train as train_segments
 
 if __name__ == "__main__":
-    train()
+    train_segments()

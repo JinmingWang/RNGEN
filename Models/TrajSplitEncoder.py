@@ -16,11 +16,9 @@ class Encoder(nn.Module):
             # (B, N*D_subtoken, L_subtoken)
         )
 
-        self.projs = nn.Sequential(
-            AttentionBlock(d_in=D_encode, d_out=D_encode, d_head=D_encode, n_heads=8, d_expand=1024),
-            AttentionBlock(d_in=D_encode, d_out=D_encode, d_head=D_encode, n_heads=8, d_expand=1024),
-            AttentionBlock(d_in=D_encode, d_out=D_encode, d_head=D_encode, n_heads=8, d_expand=1024),
-        )
+        self.projs = nn.Sequential(*[
+            AttentionBlock(d_in=D_encode, d_out=D_encode, d_head=D_encode, n_heads=8, d_expand=256) for i in range(8)
+        ])
 
     def forward(self, x):
         B, N, L, C = x.shape

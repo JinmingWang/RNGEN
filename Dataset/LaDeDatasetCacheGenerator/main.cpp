@@ -14,7 +14,7 @@
  * torch::Tensor    torch.Tensor
  */
 
-int count = 10;
+int data_count = 10;
 std::string path = "processed.pt";
 int graph_depth = 5;
 int trajs_per_graph = 64;
@@ -41,7 +41,7 @@ void parseConfigFile(const std::string& filename) {
 
     if (!file.is_open()) {
         std::cerr << "Unable to open file: " << filename << std::endl;
-        return configMap;
+        return;
     }
 
     std::string line;
@@ -56,7 +56,7 @@ void parseConfigFile(const std::string& filename) {
 
     file.close();
 
-    count = std::stoi(configMap.at("count"));
+    data_count = std::stoi(configMap.at("data_count"));
     path = configMap.at("path");
     graph_depth = std::stoi(configMap.at("graph_depth"));
     trajs_per_graph = std::stoi(configMap.at("trajs_per_graph"));
@@ -83,7 +83,7 @@ int main(int argc, char const *argv[]) {
     parseConfigFile(configFile);
 
     // Get the number of digits in the count
-    int count_w = std::to_string(count).length();
+    int count_w = std::to_string(data_count).length();
 
     // Easy
     LaDeDataset dataset(path, graph_depth, trajs_per_graph, max_segs_per_graph, rotation,
@@ -96,7 +96,7 @@ int main(int argc, char const *argv[]) {
     // record start time
     clock_t start = clock();
 
-    for (int i = 0; i < count; i++) {
+    for (int i = 0; i < data_count; i++) {
         auto [traj, path, graph, heatmap] = dataset.get();
         trajs.emplace_back(traj.to(torch::kCPU));
         paths.emplace_back(path.to(torch::kCPU));
@@ -104,10 +104,10 @@ int main(int argc, char const *argv[]) {
         heatmaps.emplace_back(heatmap.to(torch::kCPU));
 
         double elapsed = double(clock() - start) / CLOCKS_PER_SEC;
-        double estimated_total = elapsed / (i + 1) * count;
+        double estimated_total = elapsed / (i + 1) * data_count;
         double estimated_remaining = estimated_total - elapsed;
 
-        std::cout << "\rGenerating " << std::setw(count_w) << i + 1 << " / " << count << " trajs." << std::setw(2)
+        std::cout << "\rGenerating " << std::setw(count_w) << i + 1 << " / " << data_count << " trajs." << std::setw(2)
                   << " Elapsed: " << int(elapsed/60) << "m" << int(elapsed) % 60 << "s" << std::setw(2) << " Remaining: "
                     << int(estimated_remaining/60) << "m" << int(estimated_remaining) % 60 << "s    " << std::flush;
     }

@@ -41,6 +41,7 @@ LaDeDataset::LaDeDataset(std::string path,
     this->traj_len = traj_len;
 
     this->candidate_nodes = torch::where(this->degrees > 2)[0];
+    cout << "Number of candidate nodes: " << this->candidate_nodes.size(0) << endl;
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> LaDeDataset::get() {
