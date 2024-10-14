@@ -250,3 +250,14 @@ class SequentialWithAdditionalInputs(nn.Sequential):
         for module in self:
             x = module(x, *args)
         return x
+
+
+class Rearrange(nn.Module):
+    def __init__(self, from_shape: str, to_shape: str, **kwargs):
+        super().__init__()
+        self.from_shape = from_shape
+        self.to_shape = to_shape
+        self.kwargs = kwargs
+
+    def forward(self, x):
+        return rearrange(x, self.from_shape + ' -> ' + self.to_shape, **self.kwargs)

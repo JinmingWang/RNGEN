@@ -17,3 +17,7 @@ Just for private project
 |---------------------------------------------------------|--------------------------------------------|
 | Increase diffusion T from 500 to 1000                   | The performance is decreased               |
 | Increase dims in attn in encoder                        | No visible improvement                     |
+| Set # of trajs to 64                                    | Costly in memory, very slight improvement  |
+
+## TODO Ideas
+- Change number of trajs from 64 to 32. What does more trajs mean? More burden for the model or more information? Now we feed 64 trajs to the model, the memory cost is very high. In contrast, with 32 trajs the memory cost drops significantly. What is the effect on the generation results?
