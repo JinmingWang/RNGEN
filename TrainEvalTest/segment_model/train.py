@@ -24,6 +24,9 @@ def train():
     # Models
     encoder = Encoder(N_TRAJS, L_TRAJ, L_SUBTRAJ, D_TRAJ_ENC).to(DEVICE)
     diffusion_net = SegmentsModel(n_seg=N_SEGS, d_seg=5, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
+    torch.set_float32_matmul_precision('high')
+    encoder = torch.compile(encoder)
+    diffusion_net = torch.compile(diffusion_net)
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")
     # loss_func = torch.nn.MSELoss()
