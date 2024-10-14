@@ -16,11 +16,8 @@ class Encoder(nn.Module):
             # (B, N*D_subtoken, L_subtoken)
         )
 
-        D_hidden = D_encode * 2
         self.projs = nn.Sequential(
-            nn.Linear(D_encode, D_hidden),
-            *[AttentionBlock(d_in=D_hidden, d_out=D_hidden, d_head=D_hidden, n_heads=8, d_expand=256) for _ in range(8)],
-            nn.Linear(D_hidden, D_encode)
+            *[AttentionBlock(d_in=D_encode, d_out=D_encode, d_head=D_encode, n_heads=8, d_expand=256) for _ in range(8)],
         )
 
     def forward(self, x):

@@ -16,3 +16,4 @@ Just for private project
 | Idea                                                    | Description                                |
 |---------------------------------------------------------|--------------------------------------------|
 | Increase diffusion T from 500 to 1000                   | The performance is decreased               |
+| Increase dims in attn in encoder                        | No visible improvement                     |
