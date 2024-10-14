@@ -8,7 +8,6 @@ from Diffusion import DDPM
 
 import torch
 
-
 def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsModel, ddpm: DDPM) -> Tuple[plt.Figure, Tensor]:
     """
     Evaluate the model on the given batch

@@ -21,7 +21,7 @@ class Block(nn.Module):
         self.ca = CrossAttentionBlock(d_in=d_in, d_context=d_traj_enc, d_head=d_in // 4, d_expand=d_out * 2,
                                         d_out=d_out, n_heads=self.n_heads, dropout=self.dropout)
         self.sa = AttentionWithTime(d_in=d_out, d_head=d_out // 4, d_expand=d_out * 2, d_out=d_out,
-                                      d_time=128, n_heads=self.n_heads, dropout=self.dropout)
+                                      d_time=64, n_heads=self.n_heads, dropout=self.dropout)
 
     def forward(self, f_segs, traj_enc, t):
         f_segs = self.ca(f_segs, traj_enc)
@@ -42,7 +42,7 @@ class SegmentsModel(nn.Module):
             nn.Embedding(T, 128),
             nn.Linear(128, 128),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(128, 128),
+            nn.Linear(128, 64),
             nn.LeakyReLU(inplace=True),
         )
 
