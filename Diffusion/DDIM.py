@@ -27,6 +27,7 @@ class DDIM:
             betas = torch.linspace(min_beta, max_beta, max_diffusion_step).to(device)
 
         self.skip_step = skip_step
+        self.device = device
 
         alphas = 1 - betas
         alpha_bars = torch.empty_like(alphas)
@@ -74,10 +75,24 @@ class DDIM:
             return pred_x0
         return self.diffusionForward(pred_x0, next_t, ϵ_pred)
 
+    def diffusionBackwardStepWithx0(self, pred_x0, t, next_t, ϵ_pred: Tensor):
+        """
+        Backward Diffusion Process
+        :param x_t: input images (B, C, L)
+        :param t: time steps
+        :param ϵ_pred: predicted noise (B, C, L)
+        :param scaling_factor: scaling factor of noise
+        :return: x_t-1: output images (B, C, L)
+        """
+        if t <= self.skip_step:
+            return pred_x0
+        return self.diffusionForward(pred_x0, next_t, ϵ_pred)
+
     @torch.no_grad()
     def diffusionBackward(self,
-                          unet: torch.nn.Module,
-                          x_T, traj_encoding,
+                          noises: List[Tensor],
+                          pred_func: Callable,
+                          mode: Literal["eps", "x0"] = "x0",
                           verbose=False):
         """
         Backward Diffusion Process
@@ -88,17 +103,23 @@ class DDIM:
         :param mask: mask (B, 1, L), 1 for erased, 0 for not erased, -1 for padding
         :param query_len: query length (B, )
         """
-        B = x_T.shape[0]
-        x_t = x_T.clone()
-        tensor_t = torch.arange(self.T, dtype=torch.long, device=x_t.device).repeat(B, 1)  # (B, T)
+        B = noises[0].shape[0]
+        content_list = [noise.clone() for noise in noises]
+        tensor_t = torch.arange(self.T, dtype=torch.long, device=self.device).repeat(B, 1)  # (B, T)
         t_list = list(range(self.T - 1, -1, -self.skip_step))
         if t_list[-1] != 0:
             t_list.append(0)
         pbar = tqdm(t_list) if verbose else t_list
         for ti, t in enumerate(pbar):
-            eps_pred = unet(x_t, traj_encoding, tensor_t[:, t])
-            t_next = 0 if ti + 1 == len(t_list) else t_list[ti + 1]
+            if mode == "eps":
+                noise_preds = pred_func(content_list, tensor_t[:, t])
+                t_next = 0 if ti + 1 == len(t_list) else t_list[ti + 1]
 
-            x_t = self.diffusionBackwardStep(x_t, t, t_next, eps_pred)
-
-        return x_t
+                for i in range(len(content_list)):
+                    content_list[i] = self.diffusionBackwardStep(content_list[i], t, t_next, noise_preds[i])
+            else:
+                x0_preds, noise_preds = pred_func(content_list, tensor_t[:, t])
+                t_next = 0 if ti + 1 == len(t_list) else t_list[ti + 1]
+                for i in range(len(content_list)):
+                    content_list[i] = self.diffusionBackwardStepWithx0(x0_preds[i], t, t_next, noise_preds[i])
+        return content_list
