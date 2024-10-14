@@ -18,7 +18,7 @@ class Block(nn.Module):
         self.n_heads = n_heads
         self.dropout = dropout
 
-        self.ca = CrossAttentionBlock(d_in=d_in, d_context=d_traj_enc, d_head=d_in // 4, d_expand=d_out * 2,
+        self.ca = CrossAttentionBlock(d_in=d_in, d_context=d_traj_enc, d_head=d_out // 4, d_expand=d_out * 2,
                                         d_out=d_out, n_heads=self.n_heads, dropout=self.dropout)
         self.sa = AttentionWithTime(d_in=d_out, d_head=d_out // 4, d_expand=d_out * 2, d_out=d_out,
                                       d_time=64, n_heads=self.n_heads, dropout=self.dropout)

@@ -6,6 +6,12 @@ from typing import List, Literal, Tuple
 
 Tensor = torch.Tensor
 
+
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * func.sigmoid(x)
+
+
 class AttentionBlock(nn.Module):
     def __init__(self, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int, dropout: float=0.1):
         super(AttentionBlock, self).__init__()
@@ -90,6 +96,10 @@ class CrossAttentionBlock(nn.Module):
         )
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
+        self.merge_residual_proj = nn.Sequential(
+            Swish(),
+            nn.Linear(d_in * 2, d_in)
+        )
 
         self.ff = nn.Sequential(
             nn.LayerNorm(d_in),
@@ -117,7 +127,7 @@ class CrossAttentionBlock(nn.Module):
 
         # out shape: (B, N, H*in_c)
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = x + self.merge_head_proj(out)
+        x = self.merge_residual_proj(torch.cat([x, self.merge_head_proj(out)], dim=-1))
 
         return self.ff(x) + self.shortcut(x)
 
@@ -196,10 +206,10 @@ class Res2D(nn.Module):
         self.layers = nn.Sequential(
             nn.Conv2d(d_in, d_in * 2, 3, 1, 1),
             nn.BatchNorm2d(d_in * 2),
-            nn.LeakyReLU(inplace=True),
+            Swish(),
             nn.Conv2d(d_in * 2, d_in * 2, 3, 1, 1),
             nn.BatchNorm2d(d_in * 2),
-            nn.LeakyReLU(inplace=True),
+            Swish(),
             nn.Conv2d(d_in * 2, d_out, 3, 1, 1)
         )
 
@@ -216,10 +226,10 @@ class Res1D(nn.Module):
         self.layers = nn.Sequential(
             nn.Conv1d(d_in, d_mid, 3, 1, 1),
             nn.BatchNorm1d(d_mid),
-            nn.LeakyReLU(inplace=True),
+            Swish(),
             nn.Conv1d(d_mid, d_mid, 3, 1, 1),
             nn.BatchNorm1d(d_mid),
-            nn.LeakyReLU(inplace=True),
+            Swish(),
             nn.Conv1d(d_mid, d_out, 3, 1, 1)
         )
 
@@ -232,7 +242,7 @@ class Conv2dInAct(nn.Sequential):
         super().__init__(
             nn.Conv2d(d_in, d_out, k, s, p),
             nn.InstanceNorm2d(d_out),
-            nn.LeakyReLU(inplace=True)
+            Swish()
         )
 
 
@@ -241,7 +251,7 @@ class Conv1dBnAct(nn.Sequential):
         super().__init__(
             nn.Conv1d(d_in, d_out, k, s, p),
             nn.BatchNorm1d(d_out),
-            nn.LeakyReLU(inplace=True)
+            Swish()
         )
 
 
