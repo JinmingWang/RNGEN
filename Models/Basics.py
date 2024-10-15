@@ -41,7 +41,7 @@ class AttentionBlock(nn.Module):
         self.ff = nn.Sequential(
             nn.LayerNorm(d_in),
             nn.Linear(d_in, d_expand),
-            nn.GELU(),
+            Swish(),
             nn.Dropout(dropout),
             nn.Linear(d_expand, d_out),
         )
@@ -72,7 +72,7 @@ class AttentionBlock(nn.Module):
 
 
 class CrossAttentionBlock(nn.Module):
-    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int, d_out: int, n_heads: int, dropout: float=0.1):
+    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int, d_out: int, d_time: int, n_heads: int, dropout: float=0.1):
         super(CrossAttentionBlock, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -84,6 +84,7 @@ class CrossAttentionBlock(nn.Module):
         self.d_in = d_in
         self.scale = d_head ** -0.5
         self.dropout = nn.Dropout(dropout)
+        self.d_time = d_time
 
         self.q_proj = nn.Sequential(
             nn.LayerNorm(d_in),
@@ -96,22 +97,29 @@ class CrossAttentionBlock(nn.Module):
         )
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
-        self.merge_residual_proj = nn.Sequential(
+        torch.nn.init.zeros_(self.merge_head_proj.weight)
+        torch.nn.init.zeros_(self.merge_head_proj.bias)
+
+        self.time_proj = nn.Sequential(
+            nn.Linear(d_time, d_time),
             Swish(),
-            nn.Linear(d_in * 2, d_in)
+            nn.Linear(d_time, d_in)
         )
 
         self.ff = nn.Sequential(
             nn.LayerNorm(d_in),
             nn.Linear(d_in, d_expand),
-            nn.GELU(),
+            Swish(),
             nn.Dropout(dropout),
             nn.Linear(d_expand, d_out),
         )
 
+        torch.nn.init.zeros_(self.ff[-1].weight)
+        torch.nn.init.zeros_(self.ff[-1].bias)
+
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
-    def forward(self, x, context):
+    def forward(self, x, context, t):
         B, N, in_c = x.shape
 
         q = rearrange(self.q_proj(x), 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
@@ -127,9 +135,10 @@ class CrossAttentionBlock(nn.Module):
 
         # out shape: (B, N, H*in_c)
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = self.merge_residual_proj(torch.cat([x, self.merge_head_proj(out)], dim=-1))
+        x = x + self.merge_head_proj(out)
 
-        return self.ff(x) + self.shortcut(x)
+        t = self.time_proj(t).view(B, 1, self.d_in)
+        return self.ff(x + t) + self.shortcut(x)
 
 
 class AttentionWithTime(nn.Module):
@@ -155,16 +164,24 @@ class AttentionWithTime(nn.Module):
         )
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
+        torch.nn.init.zeros_(self.merge_head_proj.weight)
+        torch.nn.init.zeros_(self.merge_head_proj.bias)
 
-        self.time_proj = nn.Linear(d_time, d_time)
+        self.time_proj = nn.Sequential(
+            nn.Linear(d_time, d_time),
+            Swish(),
+            nn.Linear(d_time, d_in)
+        )
 
         self.ff = nn.Sequential(
-            nn.LayerNorm(d_in + d_time),
-            nn.Linear(d_in + d_time, d_expand),
-            nn.GELU(),
+            nn.LayerNorm(d_in),
+            nn.Linear(d_in, d_expand),
+            Swish(),
             nn.Dropout(dropout),
             nn.Linear(d_expand, d_out),
         )
+        torch.nn.init.zeros_(self.ff[-1].weight)
+        torch.nn.init.zeros_(self.ff[-1].bias)
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
@@ -185,8 +202,8 @@ class AttentionWithTime(nn.Module):
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
-        t = self.time_proj(t).view(B, 1, self.d_time).expand(-1, N, -1)     # (B, N, time_c)
-        return self.shortcut(x) + self.ff(torch.cat([x, t], dim=-1))
+        t = self.time_proj(t).view(B, 1, self.d_in)
+        return self.shortcut(x) + self.ff(x + t)
 
 
 class Transpose(nn.Module):
@@ -225,13 +242,16 @@ class Res1D(nn.Module):
 
         self.layers = nn.Sequential(
             nn.Conv1d(d_in, d_mid, 3, 1, 1),
-            nn.BatchNorm1d(d_mid),
+            nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_mid, 3, 1, 1),
-            nn.BatchNorm1d(d_mid),
+            nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_out, 3, 1, 1)
         )
+
+        torch.nn.init.zeros_(self.layers[-1].weight)
+        torch.nn.init.zeros_(self.layers[-1].bias)
 
         self.shortcut = nn.Identity() if d_in == d_out else nn.Conv1d(d_in, d_out, 1, 1, 0)
 
