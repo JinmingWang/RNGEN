@@ -1,6 +1,4 @@
-from .HungarianLoss_SeqMat import HungarianLoss as HungarianLoss_SeqMat
-from .HungarianLoss_Sequential import HungarianLoss as HungarianLoss_Sequential
-from .HungarianLoss_DoubleSeq import HungarianLoss as HungarianLoss_DoubleSeq
+from .HungarianLoss import HungarianMode, HungarianLoss
 from .NodeEdgeModel import NodeEdgeModel
 from .SegmentsModel import SegmentsModel
 from .TrajSplitEncoder import Encoder

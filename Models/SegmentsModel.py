@@ -1,5 +1,4 @@
 from .Basics import *
-from .HungarianLoss_SeqMat import HungarianLoss
 
 class Block(nn.Module):
     def __init__(self, d_in: int,
@@ -96,13 +95,9 @@ class SegmentsModel(nn.Module):
         out = self.head(x)
         if self.pred_x0:
             segs, noise = torch.split(out, [5, 5], dim=-1)
-            x_center, y_center, direction, length, valid_mask = torch.unbind(segs, dim=-1)
-            segs = torch.stack([
-                x_center,
-                y_center,
-                torch.tanh(direction) * torch.pi,
-                length,
-                torch.sigmoid(valid_mask)
+            segs = torch.cat([
+                segs[..., :4],
+                torch.sigmoid(segs[..., 4:])
             ], dim=-1)
             return segs, noise
 

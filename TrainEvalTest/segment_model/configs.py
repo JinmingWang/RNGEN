@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "More_t_emb_Same_LR"
+COMMENT = "xydl"
 
 # Training Parameters
 LR_ENCODER = 2e-4

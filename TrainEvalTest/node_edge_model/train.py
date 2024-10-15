@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import NodeEdgeModel, Encoder, HungarianLoss_SeqMat
+from Models import NodeEdgeModel, Encoder, HungarianLoss, HungarianMode
 from Diffusion import DDPM
 
 

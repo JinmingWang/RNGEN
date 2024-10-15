@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, Encoder, HungarianLoss_Sequential
+from Models import SegmentsModel, Encoder, HungarianLoss, HungarianMode
 from Diffusion import DDPM
 
 
@@ -30,7 +30,7 @@ def train():
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss_Sequential('l1')
+    loss_func = HungarianLoss(HungarianMode.Seq, 'l1')
 
     # Optimizer & Scheduler
     optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},

@@ -162,14 +162,21 @@ class LaDeCachedDataset(Dataset):
         :param xyxy: The segments (B, N, 5), where 5 is (x1, y1, x2, y2, is_valid)
         :return: The segments in (B, N, 5) format
         """
+        # Unbind the input tensor to get x1, y1, x2, y2
         x1, y1, x2, y2, valid_mask = torch.unbind(xyxy, dim=-1)
-        x_center = (x1 + x2) / 2
-        y_center = (y1 + y2) / 2
-        dx = x2 - x1
-        dy = y2 - y1
-        direction = torch.atan2(dy, dx)     # Angle in radians, range: (-pi, pi)
-        length = torch.sqrt(dx ** 2 + dy ** 2)
-        return torch.stack([x_center, y_center, direction, length, valid_mask], dim=-1)
+
+        # Compute center coordinates
+        x_c, y_c = (x1 + x2) / 2, (y1 + y2) / 2
+
+        # Compute the length of each segment
+        lengths = torch.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+        # Compute the direction and ensure it's in the range [0, pi)
+        directions = torch.atan2(y2 - y1, x2 - x1)
+        directions = torch.remainder(directions, torch.pi)
+
+        # Return the concatenated result
+        return torch.stack([x_c, y_c, directions, lengths, valid_mask], dim=-1)
 
 
     @staticmethod
@@ -179,11 +186,18 @@ class LaDeCachedDataset(Dataset):
         :param xydl: The segments (B, N, 5), where 5 is (x_center, y_center, direction, length, is_valid)
         :return: The segments in (B, N, 5) format
         """
-        x_center, y_center, direction, length, valid_mask = torch.unbind(xydl, dim=-1)
-        x1 = x_center - length / 2 * torch.cos(direction)
-        y1 = y_center - length / 2 * torch.sin(direction)
-        x2 = x_center + length / 2 * torch.cos(direction)
-        y2 = y_center + length / 2 * torch.sin(direction)
+        # Unbind the input tensor to get x_c, y_c, directions, lengths
+        x_c, y_c, directions, lengths, valid_mask = torch.unbind(xydl, dim=-1)
+
+        # Compute half-length components
+        half_dx = (lengths / 2) * torch.cos(directions)
+        half_dy = (lengths / 2) * torch.sin(directions)
+
+        # Compute x1, y1, x2, y2 based on the center and direction
+        x1, y1 = x_c - half_dx, y_c - half_dy
+        x2, y2 = x_c + half_dx, y_c + half_dy
+
+        # Return the concatenated result
         return torch.stack([x1, y1, x2, y2, valid_mask], dim=-1)
 
 

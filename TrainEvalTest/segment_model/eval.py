@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.node_edge_model.configs import *
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss_Sequential, SegmentsModel, Encoder
+from Models import HungarianLoss, HungarianMode, SegmentsModel, Encoder
 from Diffusion import DDPM
 
 import torch
@@ -38,7 +38,7 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
     for b in range(batch["segs"].shape[0]):
         valid_segs.append(segs[b, :, :-1][valid_mask[b]])
 
-    loss = HungarianLoss_Sequential()(segs, batch["segs"])
+    loss = HungarianLoss(HungarianMode.Seq)(segs, batch["segs"])
 
     plot_manager = PlotManager(5, 2, 2)
 

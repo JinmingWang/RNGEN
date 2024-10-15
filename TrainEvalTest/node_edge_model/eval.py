@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.node_edge_model.configs import *
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss_SeqMat, DiffusionNet, Encoder
+from Models import HungarianLoss, HungarianMode, DiffusionNet, Encoder
 from Diffusion import DDPM
 
 import torch

@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, Encoder, HungarianLoss_DoubleSeq
+from Models import SegmentsModel, Encoder, HungarianLoss, HungarianMode
 from Diffusion import DDIM
 
 
@@ -30,7 +30,7 @@ def train():
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss_DoubleSeq('l1')
+    loss_func = HungarianLoss(HungarianMode.DoubleSeq, 'l1', [1.0, 1.0, 0.5, 1.0, 0.1])
 
     # Optimizer & Scheduler
     optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
@@ -55,7 +55,7 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = LaDeCachedDataset.xyxy2xydl(segments)
+                batch["segs"] = segments
 
                 noise = torch.randn_like(batch["segs"])
 
