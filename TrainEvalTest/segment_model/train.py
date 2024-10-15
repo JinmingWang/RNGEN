@@ -22,7 +22,7 @@ def train():
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
     # Models
-    encoder = Encoder(N_TRAJS, L_TRAJ, L_SUBTRAJ, D_TRAJ_ENC).to(DEVICE)
+    encoder = Encoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
     diffusion_net = SegmentsModel(n_seg=N_SEGS, d_seg=5, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
     torch.set_float32_matmul_precision('high')
     encoder = torch.compile(encoder)

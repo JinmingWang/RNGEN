@@ -1,10 +1,10 @@
 
 from datetime import datetime
 
-COMMENT = "NTrajs_32_Non_Overlap_Enc"
+COMMENT = "More_t_emb_Same_LR"
 
 # Training Parameters
-LR_ENCODER = 1e-4
+LR_ENCODER = 2e-4
 LR_DIFFUSION = 2e-4
 LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 30
@@ -16,5 +16,5 @@ LOG_DIR = f"./Runs/SegmentsModel/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{COM
 
 # Logging Parameters
 MOV_AVG_LEN = 4*160
-LOG_INTERVAL = 10
-EVAL_INTERVAL = 300
+LOG_INTERVAL = 20
+EVAL_INTERVAL = 375

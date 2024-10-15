@@ -25,7 +25,8 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
         noise = torch.randn_like(batch["segs"])
 
         def pred_func(noisy_contents: List[Tensor], t: Tensor) -> Tuple[List[Tensor], List[Tensor]]:
-            x0_pred, noise_pred = diffusion_net(*noisy_contents, traj_enc, t)
+            x0_pred, _ = diffusion_net(*noisy_contents, traj_enc, t)
+            noise_pred = torch.randn_like(x0_pred)
             return [x0_pred], [noise_pred]
 
         segs = ddim.diffusionBackward([noise], pred_func)[0]
