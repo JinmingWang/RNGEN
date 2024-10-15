@@ -1,7 +1,6 @@
 import torch
 from Models import Encoder
 
-TAE = TrajAutoEncoder()
+TAE = Encoder(N_trajs=64, L_traj=128, D_encode=32)
 
-torch.save(TAE.encoder.state_dict(), "encoder.pth")
-torch.save(TAE.decoder.state_dict(), "decoder.pth")
+torch.save(TAE.state_dict(), "encoder.pth")

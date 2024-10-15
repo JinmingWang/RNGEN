@@ -1,7 +1,4 @@
-import matplotlib.pyplot as plt
-
-from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.node_edge_model.configs import *
+from Dataset import LaDeCachedDataset
 from TrainEvalTest.Utils import *
 from Models import HungarianLoss_Sequential, SegmentsModel, Encoder
 from Diffusion import DDIM
@@ -34,12 +31,15 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
     # Remove padding nodes
     valid_mask = segs[:, :, -1] >= 0.5
 
+    pred_segs_xyxy = LaDeCachedDataset.xydl2xyxy(segs)
+    segs_xyxy = LaDeCachedDataset.xydl2xyxy(batch["segs"])
+
     # Get valid nodes and adjacency matrices
     valid_segs = []
     for b in range(batch["segs"].shape[0]):
-        valid_segs.append(segs[b, :, :-1][valid_mask[b]])
+        valid_segs.append(pred_segs_xyxy[b, :, :-1][valid_mask[b]])
 
-    loss = HungarianLoss_Sequential()(segs, batch["segs"])
+    loss = HungarianLoss_Sequential()(pred_segs_xyxy, segs_xyxy)
 
     plot_manager = PlotManager(5, 2, 2)
 

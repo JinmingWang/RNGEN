@@ -1,4 +1,5 @@
 # LaDe Dataset: https://arxiv.org/abs/2306.10675
+import torch
 from torch.utils.data import Dataset
 from .Utils import *
 from random import randint
@@ -149,4 +150,44 @@ class LaDeCachedDataset(Dataset):
         nodes_count_tensor = torch.tensor(nodes_counts, dtype=torch.long, device=DEVICE)
 
         return {"nodes": nodes_padded_tensor, "adj_mats": adj_padded_tensor, "n_nodes": nodes_count_tensor}
+
+    @staticmethod
+    def xyxy2xydl(xyxy: Tensor) -> Tensor:
+        """
+        Convert a segment (x1, y1, x2, y2) to a segment (x_center, y_center, direction, length)
+        Why? Because a segment in x1y1x2y2 format can also be represented in x2y2x1y1 format,
+        this non-uniqueness is problematic. Imagine a segment (x1, y1, x2, y2), if the model predicts
+        (x2, y2, x1, y1) instead, it should be considered correct. Or, if two given segments are (x1, y1, x2, y2) and
+        (x2, y2, x1, y1), the attention mechanism should be able to match them as if they are the same segment.
+        :param xyxy: The segments (B, N, 5), where 5 is (x1, y1, x2, y2, is_valid)
+        :return: The segments in (B, N, 5) format
+        """
+        x1, y1, x2, y2, valid_mask = torch.unbind(xyxy, dim=-1)
+        x_center = (x1 + x2) / 2
+        y_center = (y1 + y2) / 2
+        dx = x2 - x1
+        dy = y2 - y1
+        direction = torch.atan2(dy, dx)     # Angle in radians, range: (-pi, pi)
+        length = torch.sqrt(dx ** 2 + dy ** 2)
+        return torch.stack([x_center, y_center, direction, length, valid_mask], dim=-1)
+
+
+    @staticmethod
+    def xydl2xyxy(xydl: Tensor) -> Tensor:
+        """
+        Convert a segment (x_center, y_center, direction, length) to a segment (x1, y1, x2, y2)
+        :param xydl: The segments (B, N, 5), where 5 is (x_center, y_center, direction, length, is_valid)
+        :return: The segments in (B, N, 5) format
+        """
+        x_center, y_center, direction, length, valid_mask = torch.unbind(xydl, dim=-1)
+        x1 = x_center - length / 2 * torch.cos(direction)
+        y1 = y_center - length / 2 * torch.sin(direction)
+        x2 = x_center + length / 2 * torch.cos(direction)
+        y2 = y_center + length / 2 * torch.sin(direction)
+        return torch.stack([x1, y1, x2, y2, valid_mask], dim=-1)
+
+
+
+
+
 

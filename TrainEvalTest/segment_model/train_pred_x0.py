@@ -55,7 +55,7 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = segments
+                batch["segs"] = LaDeCachedDataset.xyxy2xydl(segments)
 
                 noise = torch.randn_like(batch["segs"])
 
@@ -73,7 +73,7 @@ def train():
 
                 pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
 
-                loss = loss_func(pred_segs, segments, pred_less_noisy_segs, less_noisy_segs)
+                loss = loss_func(pred_segs, batch["segs"], pred_less_noisy_segs, less_noisy_segs)
 
                 loss.backward()
 
