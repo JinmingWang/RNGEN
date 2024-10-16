@@ -27,12 +27,13 @@ def train():
 
     kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
     hu_loss_func = HungarianLoss(mode=HungarianMode.Seq)
-    mse_loss_func = nn.MSELoss()
+    mse_loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
     params = list(encoder.parameters()) + list(decoder.parameters())
     optimizer = AdamW(params, lr=LR)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE, min_lr=LR_REDUCE_MIN)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
+                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
     # Prepare Logging
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -57,7 +58,9 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = segments
+                # randomly permute the segments along the graph dimension
+                perm = torch.randperm(segments.shape[1])
+                batch["segs"] = segments[:, perm, :]
 
                 # randomly permute the segments along the graph dimension
                 perm = torch.randperm(batch["segs"].shape[1])

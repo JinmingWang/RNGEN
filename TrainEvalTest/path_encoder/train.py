@@ -22,13 +22,15 @@ def train():
 
     # Models
     encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH).to(DEVICE)
+    torch.set_float32_matmul_precision('high')
+    encoder = torch.compile(encoder)
 
     loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
     optimizer = AdamW(encoder.parameters(), lr=LR_ENCODER)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
-                                     min_lr=LR_REDUCE_MIN)
+                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
     # Prepare Logging
     os.makedirs(LOG_DIR)

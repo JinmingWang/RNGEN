@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "encoder"
+COMMENT = "GVAE"
 
 # Training Parameters
 D_IN = 5
@@ -19,7 +19,7 @@ LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 30
 LR_REDUCE_MIN = 1e-7
 LR_REDUCE_THRESHOLD = 1e-5
-EPOCHS = 800
+EPOCHS = 2000
 B = 64
 LOG_DIR = f"./Runs/GraphVAE/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{COMMENT}/"
 
