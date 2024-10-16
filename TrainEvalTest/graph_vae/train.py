@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import GraphEncoder, GraphDecoder, VAELoss
+from Models import GraphEncoder, GraphDecoder, KLLoss, HungarianLoss, HungarianMode
 
 
 def train():
@@ -25,7 +25,8 @@ def train():
     decoder = GraphDecoder(d_latent=D_LATENT, d_out=D_IN, d_head=D_HEAD, d_expand=D_EXPAND,
                            d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=N_LAYERS, dropout=0.0).to(DEVICE)
 
-    loss_func = VAELoss(kl_weight=KL_WEIGHT)
+    kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
+    hu_loss_func = HungarianLoss(mode=HungarianMode.SeqMat)
 
     # Optimizer & Scheduler
     params = list(encoder.parameters()) + list(decoder.parameters())
@@ -47,6 +48,8 @@ def train():
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, torch.Tensor]
 
+                batch |= LaDeCachedDataset.SegmentsToNodesAdj(batch["graphs"], N_NODES)
+
                 # count number of non-zero tokens for each batch graph
                 segments = batch["graphs"].flatten(2)  # (B, G, 2, 2) -> (B, G, 4)
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
@@ -54,15 +57,21 @@ def train():
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
                 batch["segs"] = segments
 
+                # randomly permute the segments along the graph dimension
+                perm = torch.randperm(batch["segs"].shape[1])
+                batch["segs"] = batch["segs"][:, perm, :]
+
                 optimizer.zero_grad()
 
                 # Forward pass through encoder and decoder
                 z_mean, z_logvar = encoder(batch["segs"])  # Pass through encoder
                 z = encoder.reparameterize(z_mean, z_logvar)           # Reparameterization trick
-                reconstructed = decoder(z)                    # Pass through decoder
+                nodes, adj_mat = decoder(z)                    # Pass through decoder
 
                 # Compute VAE loss
-                loss, mse_loss, kl_loss = loss_func(reconstructed, batch["segs"], z_mean, z_logvar)
+                kl_loss = kl_loss_func(z_mean, z_logvar)
+                mse_loss = hu_loss_func(nodes, batch["nodes"], adj_mat, batch["adj_mats"])
+                loss = kl_loss + mse_loss
 
                 # Backpropagation
                 loss.backward()
@@ -85,7 +94,7 @@ def train():
 
             # Plot reconstructed segments and graphs
             plot_manager.plotSegments(batch["graphs"][0], 0, 0, "Original")
-            plot_manager.plotSegments(reconstructed[0, :, :4].view(-1, 2, 2), 0, 1, "Reconstructed")
+            plot_manager.plotNodesWithAdjMat(nodes[0], adj_mat[0], 0, 1, "Reconstructed")
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 
             # Save models
