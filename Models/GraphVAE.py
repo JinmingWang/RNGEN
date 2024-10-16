@@ -29,11 +29,11 @@ class EdgeBlock(nn.Module):
 
 
 class GraphEncoder(nn.Module):
-    def __init__(self, d_in: int, d_latent: int, d_head: int, d_expand: int, d_hidden: int, n_heads: int, n_layers: int,
+    def __init__(self, d_latent: int, d_head: int, d_expand: int, d_hidden: int, n_heads: int, n_layers: int,
                  dropout: float = 0.1):
         super(GraphEncoder, self).__init__()
         # Initial projection from input to hidden dimension
-        self.input_proj = nn.Linear(d_in, d_hidden)
+        self.input_proj = nn.Linear(5, d_hidden)
         self.attention_blocks = nn.ModuleList([
             AttentionBlock(d_hidden, d_head, d_expand, d_hidden, n_heads, dropout)
             for _ in range(n_layers)
@@ -62,30 +62,36 @@ class GraphEncoder(nn.Module):
 
 
 class GraphDecoder(nn.Module):
-    def __init__(self, d_latent: int, d_out: int, d_head: int, d_expand: int, d_hidden: int, n_heads: int,
+    def __init__(self, d_latent: int, d_head: int, d_expand: int, d_hidden: int, n_heads: int,
                  n_layers: int, dropout: float = 0.1):
         super(GraphDecoder, self).__init__()
         # input shape: (B, N_segs, d_latent)
-        self.latent_proj = nn.Sequential(
-            Rearrange("B N (P D)", "B (P N) D", P=2),     # (B, 2, N_segs, d_latent//2)
-            # Now there are N_nodes tokens
-            nn.Linear(d_latent // 2, d_hidden)          # (B, 2, N_segs, d_hidden)
-        )
+        self.latent_proj = nn.Linear(d_latent, d_hidden)
 
         self.attention_blocks = nn.ModuleList([
             AttentionBlock(d_hidden, d_head, d_expand, d_hidden, n_heads, dropout)
             for _ in range(n_layers)
         ])
 
-        self.mat_block = EdgeBlock(d_in=d_hidden, d_out=1, d_head=d_head)
-        self.output_proj = nn.Linear(d_hidden, 2)
+        self.nodes_head = nn.Sequential(
+            Rearrange("B N (P D)", "B (P N) D", P=2),   # (B, N_nodes, d_hidden//2)
+            AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout),
+            AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout),
+            nn.Linear(d_hidden//2, 3)
+        )
+
+        self.segments_head = nn.Linear(d_hidden, 5)
 
     def forward(self, z):
         x = self.latent_proj(z)  # Project latent vector to hidden dimension
         for attn_block in self.attention_blocks:
             x = attn_block(x)  # Pass through each attention block
 
-        edges = torch.sigmoid(self.mat_block(x).squeeze(1))  # Compute adjacency matrix
+        nodes = self.nodes_head(x)
+        segs = self.segments_head(x)
 
-        nodes = self.output_proj(x)  # Project back to output dimension
-        return nodes, edges
+        # nodes: (B, N_nodes, 3), segs: (B, N_segs, 5)
+        nodes[..., 2] = torch.sigmoid(nodes[..., 2])  # Sigmoid for the node type
+        segs[..., 4] = torch.sigmoid(segs[..., 4])    # Sigmoid for the valid mask
+
+        return nodes, segs

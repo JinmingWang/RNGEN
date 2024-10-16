@@ -20,13 +20,14 @@ def train():
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
     # Models
-    encoder = GraphEncoder(d_in=D_IN, d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
+    encoder = GraphEncoder(d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
                            d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=N_LAYERS, dropout=0.0).to(DEVICE)
-    decoder = GraphDecoder(d_latent=D_LATENT, d_out=D_IN, d_head=D_HEAD, d_expand=D_EXPAND,
+    decoder = GraphDecoder(d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
                            d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=N_LAYERS, dropout=0.0).to(DEVICE)
 
     kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
-    hu_loss_func = HungarianLoss(mode=HungarianMode.SeqMat)
+    hu_loss_func = HungarianLoss(mode=HungarianMode.Seq)
+    mse_loss_func = nn.MSELoss()
 
     # Optimizer & Scheduler
     params = list(encoder.parameters()) + list(decoder.parameters())
@@ -37,12 +38,13 @@ def train():
     os.makedirs(LOG_DIR, exist_ok=True)
     writer = SummaryWriter(log_dir=LOG_DIR)
     mov_avg_kld = MovingAvg(MOV_AVG_LEN)
-    mov_avg_mse = MovingAvg(MOV_AVG_LEN)
+    mov_avg_nodes = MovingAvg(MOV_AVG_LEN)
+    mov_avg_segs = MovingAvg(MOV_AVG_LEN)
     global_step = 0
     best_loss = float("inf")
-    plot_manager = PlotManager(5, 1, 2)
+    plot_manager = PlotManager(5, 2, 2)
 
-    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["KLD", "MSE", "lr"]) as progress:
+    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["KLD", "Nodes", "Segs", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
             for i, batch in enumerate(dataloader):
@@ -66,12 +68,13 @@ def train():
                 # Forward pass through encoder and decoder
                 z_mean, z_logvar = encoder(batch["segs"])  # Pass through encoder
                 z = encoder.reparameterize(z_mean, z_logvar)           # Reparameterization trick
-                nodes, adj_mat = decoder(z)                    # Pass through decoder
+                pred_nodes, pred_segs = decoder(z)                    # Pass through decoder
 
                 # Compute VAE loss
                 kl_loss = kl_loss_func(z_mean, z_logvar)
-                mse_loss = hu_loss_func(nodes, batch["nodes"], adj_mat, batch["adj_mats"])
-                loss = kl_loss + mse_loss
+                nodes_loss = hu_loss_func(pred_nodes, batch["nodes"])
+                segs_loss = mse_loss_func(pred_segs, batch["segs"])
+                loss = kl_loss + nodes_loss + segs_loss
 
                 # Backpropagation
                 loss.backward()
@@ -79,22 +82,26 @@ def train():
 
                 total_loss += loss
                 global_step += 1
-                mov_avg_mse.update(mse_loss)
                 mov_avg_kld.update(kl_loss)
+                mov_avg_nodes.update(nodes_loss)
+                mov_avg_segs.update(segs_loss)
 
                 # Progress update
-                progress.update(e, i, KLD=mov_avg_mse.get(), MSE=mov_avg_kld.get(),
+                progress.update(e, i, KLD=mov_avg_kld.get(), Nodes=mov_avg_nodes.get(), Segs=mov_avg_segs.get(),
                                 lr=optimizer.param_groups[0]['lr'])
 
                 # Logging
                 if global_step % 5 == 0:
                     writer.add_scalar("loss/KLD", mov_avg_kld.get(), global_step)
-                    writer.add_scalar("loss/MSE", mov_avg_mse.get(), global_step)
+                    writer.add_scalar("loss/Nodes", mov_avg_nodes.get(), global_step)
+                    writer.add_scalar("loss/Segs", mov_avg_segs.get(), global_step)
                     writer.add_scalar("Learning Rate", optimizer.param_groups[0]["lr"], global_step)
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotSegments(batch["graphs"][0], 0, 0, "Original")
-            plot_manager.plotNodesWithAdjMat(nodes[0], adj_mat[0], 0, 1, "Reconstructed")
+            plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
+            plot_manager.plotSegments(pred_segs[0], 0, 1, "Pred Segs")
+            plot_manager.plotNodes(batch["nodes"][0], 1, 0, "Nodes")
+            plot_manager.plotNodes(pred_nodes[0], 1, 1, "Pred Nodes")
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 
             # Save models

@@ -70,7 +70,7 @@ class PlotManager:
 
     def plotSegments(self, segs, row, col, title):
         """
-        Plot line segments given a tensor of shape (N, 2, 2), where N is the number of segments
+        Plot line segments given a tensor of shape (N, 5), where N is the number of segments
         and each segment is defined by two points in 2D.
         """
         ax = self.axs[row, col]
@@ -79,10 +79,11 @@ class PlotManager:
 
         # Extract the points for each line segment
         for seg in segs:
-            x = seg[:, 0].cpu().detach().numpy()  # X coordinates
-            y = seg[:, 1].cpu().detach().numpy()  # Y coordinates
-            ax.plot(x, y, marker='.', linestyle='-', color='#63B2EE', markersize=10, markerfacecolor='#76DA91',
-                    lw=2)
+            x = seg[:, [0, 2]].cpu().detach().numpy()  # X coordinates
+            y = seg[:, [1, 3]].cpu().detach().numpy() # Y coordinates
+            seg_validity = seg[:, 4].cpu().detach().numpy()  # Validity of the segment
+            ax.plot(x, y, marker='.', linestyle='-', color='#63B2EE', markersize=10 * seg_validity, markerfacecolor='#76DA91',
+                    lw=2 * seg_validity)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])
@@ -145,20 +146,20 @@ class PlotManager:
         ax.clear()  # Clear previous content
         ax.set_title(title, fontsize=14, color='darkblue')
 
-        valid_nodes = nodes
+        node_validity = nodes[:, 2].cpu().detach().numpy()
 
-        ax.scatter(valid_nodes[:, 0].cpu().numpy(), valid_nodes[:, 1].cpu().numpy(),
-                   color='#76DA91', s=20, edgecolors='#63B2EE')
+        ax.scatter(nodes[:, 0].cpu().numpy(), nodes[:, 1].cpu().numpy(),
+                   color='#76DA91', s=20 * node_validity, edgecolors='#63B2EE')
 
         # Plot connections based on adjacency matrix
         adj_np = adj_mat.cpu().numpy()
-        num_nodes = len(valid_nodes)
+        num_nodes = len(nodes)
 
         for i in range(num_nodes):
             for j in range(i + 1, num_nodes):
                 if adj_np[i, j] == 1:
-                    p1 = valid_nodes[i, :2].cpu().numpy()
-                    p2 = valid_nodes[j, :2].cpu().numpy()
+                    p1 = nodes[i, :2].cpu().numpy()
+                    p2 = nodes[j, :2].cpu().numpy()
                     ax.plot([p1[0], p2[0]], [p1[1], p2[1]], linestyle='-', color='#63B2EE', lw=1)
 
         ax.set_xlim([-3, 3])
@@ -167,6 +168,27 @@ class PlotManager:
         ax.grid(True, linestyle='--', alpha=0.5)
         ax.set_xlabel('Longitude', fontsize=12)
         ax.set_ylabel('Latitude', fontsize=12)
+
+    def plotNodes(self, nodes, row, col, title):
+        """
+        Plot nodes given a tensor of shape (N, 3), where each row is (x, y, is_valid_node).
+        """
+        ax = self.axs[row, col]
+        ax.clear()
+        ax.set_title(title, fontsize=14, color='darkblue')
+
+        node_validity = nodes[:, 2].cpu().detach().numpy()
+
+        ax.scatter(nodes[:, 0].cpu().detach().numpy(), nodes[:, 1].cpu().detach().numpy(),
+                     color='#76DA91', s=20 * node_validity, edgecolors='#63B2EE')
+
+        ax.set_xlim([-3, 3])
+        ax.set_ylim([-3, 3])
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.set_xlabel('Longitude', fontsize=12)
+        ax.set_ylabel('Latitude', fontsize=12)
+
 
     def show(self):
         plt.tight_layout()
