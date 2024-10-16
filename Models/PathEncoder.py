@@ -36,19 +36,19 @@ class PathEncoder(nn.Module):
             Rearrange("B N L C", "(B N) C L"),
             Res1D(2, 64, 16),
             Res1D(16, 64, 16),
-            nn.Conv1d(16, 8, 3, 2, 1),
+            nn.Conv1d(16, 16, 3, 2, 1),
             # (BN, C=8, L=32)
         )
 
         # (BN, C=8, L=64)
 
-        self.s1 = Stage(N_trajs, L_traj // 2, 4, 8, True)     # (BN, C=16, L=16)
+        self.s1 = Stage(N_trajs, L_traj // 2, 4, 16, True)     # (BN, C=16, L=16)
 
-        self.s2 = Stage(N_trajs, L_traj // 4, 4, 16)     # (BN, C=16, L=16)
+        self.s2 = Stage(N_trajs, L_traj // 4, 4, 32)     # (BN, C=16, L=16)
 
         self.head = nn.Sequential(
             Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)
-            AttentionBlock(d_in=L_traj * 4, d_out=256, d_head=64, n_heads=8, d_expand=256),
+            AttentionBlock(d_in=L_traj * 8, d_out=256, d_head=64, n_heads=8, d_expand=256),
             AttentionBlock(d_in=256, d_out=64, d_head=64, n_heads=8, d_expand=256),
             AttentionBlock(d_in=64, d_out=L_path * 2, d_head=64, n_heads=8, d_expand=256),
             nn.Linear(L_path * 2, L_path * 2),

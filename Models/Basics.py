@@ -29,14 +29,12 @@ class AttentionBlock(nn.Module):
         self.d_q = d_head * n_heads
         self.d_k = d_head * n_heads
         self.d_v = d_in * n_heads
-        d_qkv = self.d_q * 2 + self.d_k * 2 + self.d_v
+        d_qkv = self.d_q + self.d_k + self.d_v
 
         self.qkv_proj = nn.Sequential(
             nn.LayerNorm(d_in),
             nn.Linear(d_in, d_qkv),
         )
-
-        self.score_lambda = nn.Parameter(torch.tensor(0.5))
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
 
@@ -59,17 +57,13 @@ class AttentionBlock(nn.Module):
     def forward(self, x):
         B, N, in_c = x.shape
 
-        q1, q2, k1, k2, v = self.qkv_proj(x).split([self.d_q, self.d_q, self.d_k, self.d_k, self.d_v], dim=-1)
-        q1 = rearrange(q1, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
-        k1t = rearrange(k1, 'B N (H C) -> (B H) C N', H=self.H)  # (B*H, head_c, N)
-        q2 = rearrange(q2, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
-        k2t = rearrange(k2, 'B N (H C) -> (B H) C N', H=self.H)  # (B*H, head_c, N)
+        q, k, v = self.qkv_proj(x).split([self.d_q, self.d_k, self.d_v], dim=-1)
+        q = rearrange(q, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
+        kt = rearrange(k, 'B N (H C) -> (B H) C N', H=self.H)  # (B*H, head_c, N)
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        score_main = torch.softmax(q1 @ k1t * self.scale, dim=-1)
-        score_res = torch.softmax(q2 @ k2t * self.scale, dim=-1)
-        attn = score_main - self.score_lambda * score_res
+        attn = torch.softmax(q @ kt * self.scale, dim=-1)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
