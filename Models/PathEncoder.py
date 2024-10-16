@@ -68,23 +68,19 @@ class ConvSplitAttn(nn.Module):
 
 
 # This encoder splits the trajectories into sub-trajectories
-class Stage(nn.Module):
-    def __init__(self, N_trajs: int, D_token: int, downsample: bool = False):
-        super().__init__()
+class Stage(nn.Sequential):
+    def __init__(self, N_trajs: int, D_token: int, n_splits: int, n_heads:int, downsample: bool = False):
         self.N_trajs = N_trajs
         self.D_token = D_token
+        self.n_splits = n_splits
+        self.n_heads = n_heads
 
-        self.layers = nn.Sequential(
-            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
-            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
-            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
+        super().__init__(
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, n_splits, n_heads),
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, n_splits, n_heads),
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, n_splits, n_heads),
+            nn.Conv1d(D_token, D_token * (1 + int(downsample)), 3, 1 + int(downsample), 1)
         )
-
-        self.out_proj = nn.Conv1d(D_token, D_token * (1 + int(downsample)), 3, 1 + int(downsample), 1)
-
-    def forward(self, x):
-        x = self.layers(x)
-        return self.out_proj(x)
 
 
 class PathEncoder(nn.Module):
@@ -98,19 +94,20 @@ class PathEncoder(nn.Module):
         # input: (B, N, L, C=2)
         self.s0 = nn.Sequential(
             Rearrange("B N L C", "(B N) C L"),
-            Res1D(2, 64, 16),
-            Res1D(16, 64, 32),
-            # (BN, C=8, L=32)
+            Res1D(2, 64, 32),
+            Res1D(32, 128, 64),
+            # (BN, C=32, L=64)
         )
-        # (BN, C=8, L=64)
 
-        self.s1 = Stage(N_trajs, 32, True)     # (BN, C=16, L=16)
+        self.s1 = Stage(N_trajs, 64, 16, 4, True)     # (BN, C=128, L=32)
 
-        self.s2 = Stage(N_trajs, 64, True)     # (BN, C=16, L=16)
+        self.s2 = Stage(N_trajs, 128, 8, 4, True)     # (BN, C=256, L=16)
 
         self.head = nn.Sequential(
             Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)
-            nn.Linear(L_traj * 32, 512),
+            nn.Linear(L_traj * 64, 1024),
+            Swish(),
+            nn.Linear(1024, 512),
             AttentionBlock(d_in=512, d_out=128, d_head=64, n_heads=8, d_expand=256),
             AttentionBlock(d_in=128, d_out=32, d_head=64, n_heads=8, d_expand=256),
             AttentionBlock(d_in=32, d_out=L_path * 2, d_head=64, n_heads=8, d_expand=256),
@@ -122,5 +119,6 @@ class PathEncoder(nn.Module):
         x = self.s0(x)
         x = self.s1(x)
         x = self.s2(x)
+        print(1, x.shape)
         x = self.head(x)
         return x
