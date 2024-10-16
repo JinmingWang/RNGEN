@@ -83,7 +83,7 @@ class LaDeCachedDataset(Dataset):
         :return: the sample at the given index
         """
         trajs = self.trajs[idx][:self.max_trajs].to(DEVICE)     # (N, 128, 2)
-        paths = self.paths[idx][:self.max_trajs].to(DEVICE)     # (M, 21, 2)
+        paths = self.paths[idx][:self.max_trajs].to(DEVICE)     # (N, 21, 2)
         graph = self.graph_tensor[idx].to(DEVICE)   # (G, 2, 2)
         heatmap = self.heatmap[idx].to(DEVICE)  # (2, H, W)
 
