@@ -4,7 +4,7 @@ from .Basics import *
 
 
 class ConvSplitAttn(nn.Module):
-    def __init__(self, n_trajs: int, d_in: int, d_expand: int, d_out: int, n_splits: int, dropout: float=0.1):
+    def __init__(self, n_trajs: int, d_in: int, d_expand: int, d_out: int, n_splits: int, n_heads: int, dropout: float=0.1):
         super(ConvSplitAttn, self).__init__()
 
         # in shape: (BN, C, L)
@@ -13,13 +13,14 @@ class ConvSplitAttn(nn.Module):
         # V shape: (B*H, N, in_c)
         self.N = n_trajs
         self.S = n_splits
+        self.H = n_heads
         self.d_split = d_in // n_splits
         self.d_in = d_in
         self.dropout = nn.Dropout(dropout)
 
-        self.d_q = d_in
-        self.d_k = d_in
-        self.d_v = d_in
+        self.d_q = d_in * n_heads
+        self.d_k = d_in * n_heads
+        self.d_v = d_in * n_heads
         d_qkv = self.d_q + self.d_k + self.d_v
 
         self.qkv_proj = nn.Sequential(
@@ -27,7 +28,7 @@ class ConvSplitAttn(nn.Module):
             nn.Conv1d(d_in, d_qkv, 3, 1, 1),
         )
 
-        self.merge_head_proj = nn.Conv1d(d_in, d_in, 3, 1, 1)
+        self.merge_head_proj = nn.Conv1d(d_in * n_heads, d_in, 3, 1, 1)
 
         torch.nn.init.zeros_(self.merge_head_proj.weight)
         torch.nn.init.zeros_(self.merge_head_proj.bias)
@@ -47,15 +48,20 @@ class ConvSplitAttn(nn.Module):
 
     def forward(self, x):
 
-        qkv = rearrange(self.qkv_proj(x), '(B N) (C T) (L S) -> T B (N S) (C L)', N=self.N, T=3, S=self.S)
-        q, k, v = torch.unbind(qkv, dim=0)
+        qkv = self.qkv_proj(x)
+        # This looks complicated
+        # The input x is of shape (BN, C, L), here batch size B and number of trajectories N are merged
+        # After qkv_proj, qkv is of shape (BN, 3HC, L), here 3 is because we have q, k, v, and H is the number of heads
+        # The last dimension, we split L to (L, S), the new L is the number of splits, and S is the length of each split
+        qkv = rearrange(qkv, '(B N) (T H C) (L S) -> T (B H) (N S) (C L)', N=self.N, T=3, H=self.H, S=self.S)
+        q, k, v = torch.unbind(qkv, dim=0)  # Each of shape (BH, NS, CL)
 
         # attn shape: (B*H, N, N)
         attn = 1 / torch.cdist(q, k, p=2)    # why not use softmax? because one token can attend to multiple tokens
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(attn, v), 'B (N S) (C L) -> (B N) C (L S)', N=self.N, S=self.S, C=self.d_in)
+        out = rearrange(torch.bmm(attn, v), '(B H) (N S) (C L) -> (B N) (H C) (L S)', H=self.H, N=self.N, S=self.S, C=self.d_in)
         x = x + self.merge_head_proj(out)
 
         return self.ff(x) + self.shortcut(x)
@@ -68,20 +74,16 @@ class Stage(nn.Module):
         self.N_trajs = N_trajs
         self.D_token = D_token
 
-        self.branches_1_1 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-        self.branches_1_2 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-        self.branches_1_3 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-
-        self.branches_2_1 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-        self.branches_2_2 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-        self.branches_2_3 = ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16)
-
+        self.layers = nn.Sequential(
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
+            ConvSplitAttn(N_trajs, D_token, D_token * 4, D_token, 16, 8),
+        )
 
         self.out_proj = nn.Conv1d(D_token, D_token * (1 + int(downsample)), 3, 1 + int(downsample), 1)
 
     def forward(self, x):
-        x = self.branches_1_1(x) + self.branches_1_2(x) + self.branches_1_3(x)
-        x = self.branches_2_1(x) + self.branches_2_2(x) + self.branches_2_3(x)
+        x = self.layers(x)
         return self.out_proj(x)
 
 
