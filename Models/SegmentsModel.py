@@ -74,7 +74,7 @@ class SegmentsModel(nn.Module):
         self.head = nn.Sequential(
             nn.Linear(256, 256),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(256, d_seg * (1 + int(self.pred_x0)))
+            nn.Linear(256, d_seg)
         )
 
     def forward(self, segments, traj_encoding, t):
@@ -94,11 +94,14 @@ class SegmentsModel(nn.Module):
         # x: (B, N_segs, 512)
         out = self.head(x)
         if self.pred_x0:
-            segs, noise = torch.split(out, [5, 5], dim=-1)
-            segs = torch.cat([
-                segs[..., :4],
-                torch.sigmoid(segs[..., 4:])
+            x_center, y_center, direction, length, valid_mask = torch.unbind(out, dim=-1)
+            segs = torch.stack([
+                x_center,
+                y_center,
+                torch.sigmoid(direction) * torch.pi,
+                length,
+                torch.sigmoid(valid_mask)
             ], dim=-1)
-            return segs, noise
+            return segs
 
         return out

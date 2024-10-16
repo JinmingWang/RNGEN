@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "xydl"
+COMMENT = "xydl_diffTrans"
 
 # Training Parameters
 LR_ENCODER = 2e-4
@@ -15,6 +15,6 @@ B = 64
 LOG_DIR = f"./Runs/SegmentsModel/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{COMMENT}/"
 
 # Logging Parameters
-MOV_AVG_LEN = 4*160
+MOV_AVG_LEN = 1000
 LOG_INTERVAL = 20
 EVAL_INTERVAL = 375

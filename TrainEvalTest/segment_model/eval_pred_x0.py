@@ -22,20 +22,23 @@ def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsMode
         noise = torch.randn_like(batch["segs"])
 
         def pred_func(noisy_contents: List[Tensor], t: Tensor) -> Tuple[List[Tensor], List[Tensor]]:
-            x0_pred, noise_pred = diffusion_net(*noisy_contents, traj_enc, t)
-            return [x0_pred], [noise_pred]
+            x0_pred = diffusion_net(*noisy_contents, traj_enc, t)
+            return [x0_pred], [torch.randn_like(x0_pred)]
 
         segs = ddim.diffusionBackward([noise], pred_func)[0]
 
     # Remove padding nodes
     valid_mask = segs[:, :, -1] >= 0.5
 
+    pred_segs_xyxy = LaDeCachedDataset.xydl2xyxy(segs)
+    segs_xyxy = LaDeCachedDataset.xydl2xyxy(batch["segs"])
+
     # Get valid nodes and adjacency matrices
     valid_segs = []
     for b in range(batch["segs"].shape[0]):
-        valid_segs.append(segs[b, :, :-1][valid_mask[b]])
+        valid_segs.append(pred_segs_xyxy[b, :, :-1][valid_mask[b]])
 
-    loss = HungarianLoss(HungarianMode.Seq, feature_weight=[1.0, 1.0, 1.0, 1.0, 0.1])(segs, batch["segs"])
+    loss = HungarianLoss(HungarianMode.Seq, feature_weight=[1.0, 1.0, 0.5, 1.0, 0.0])(pred_segs_xyxy, segs_xyxy)
 
     plot_manager = PlotManager(5, 2, 2)
 

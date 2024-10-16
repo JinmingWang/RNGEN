@@ -30,7 +30,7 @@ def train():
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss(HungarianMode.DoubleSeq, 'l1', [1.0, 1.0, 0.5, 1.0, 0.1])
+    loss_func = HungarianLoss(HungarianMode.Seq, 'l1', [1.0, 1.0, 0.5, 1.0, 0.0])
 
     # Optimizer & Scheduler
     optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
@@ -55,25 +55,25 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = segments
+                batch["segs"] = LaDeCachedDataset.xyxy2xydl(segments)
 
                 noise = torch.randn_like(batch["segs"])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
                 noisy_segs = ddim.diffusionForward(batch["segs"], t, noise)
 
-                s = t - 1
-                less_noisy_segs = torch.zeros_like(noisy_segs)
-                less_noisy_segs[t!=0] = ddim.diffusionForward(batch["segs"][t!=0], s[t!=0], noise[t!=0])
-                less_noisy_segs[t==0] = batch["segs"][t==0]
+                # s = t - 1
+                # less_noisy_segs = torch.zeros_like(noisy_segs)
+                # less_noisy_segs[t!=0] = ddim.diffusionForward(batch["segs"][t!=0], s[t!=0], noise[t!=0])
+                # less_noisy_segs[t==0] = batch["segs"][t==0]
 
                 optimizer.zero_grad()
                 traj_enc = encoder(batch["trajs"])
-                pred_segs, pred_noise = diffusion_net(noisy_segs, traj_enc, t)
+                pred_segs = diffusion_net(noisy_segs, traj_enc, t)
 
-                pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
+                # pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
 
-                loss = loss_func(pred_segs, batch["segs"], pred_less_noisy_segs, less_noisy_segs)
+                loss = loss_func(pred_segs, batch["segs"])
 
                 loss.backward()
 

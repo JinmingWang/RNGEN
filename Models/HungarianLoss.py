@@ -74,15 +74,11 @@ class HungarianLoss(nn.Module):
 
         for b in range(B):
             # Step 1: Compute pairwise distance matrix (L2 distance) between tokens in the first sequence
-            weighted_pred_A = pred_seq[b] * self.f_w
-            weighted_pred_B = weighted_pred_A[..., [2, 3, 0, 1, 4]]
-            weighted_target = target_seq * self.f_w
-            cost_mat_A = torch.cdist(weighted_pred_A, weighted_target, p=2)
-            cost_mat_B = torch.cdist(weighted_pred_B, weighted_target, p=2)
-            cost_mat = torch.min(cost_mat_A, cost_mat_B)
+            cost_matrix = torch.cdist(pred_seq[b] * self.f_w,
+                                      target_seq[b] * self.f_w, p=2).cpu().detach().numpy()  # (N, N)
 
             # Step 2: Apply Hungarian algorithm to find best matches
-            row_ind, col_ind = linear_sum_assignment(cost_mat)
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
             # Step 3: Compute node feature loss for matched pairs
             loss_first_seq = self.base_loss(pred_seq[b][row_ind], target_seq[b][col_ind])
@@ -91,24 +87,20 @@ class HungarianLoss(nn.Module):
 
         return torch.stack(losses).sum()
 
-    def forward_Seq(self, pred_seq, target_seq):
-        B, N, D = pred_seq.shape  # Batch size, number of nodes, feature dimension
+    def forward_Seq(self, pred_nodes, target_nodes):
+        B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
         losses = []
 
         for b in range(B):
             # Step 1: Compute pairwise distance matrix (L2 distance) between nodes
-            weighted_pred_A = pred_seq[b] * self.f_w
-            weighted_pred_B = weighted_pred_A[..., [2, 3, 0, 1, 4]]
-            weighted_target = target_seq * self.f_w
-            cost_mat_A = torch.cdist(weighted_pred_A, weighted_target, p=2)
-            cost_mat_B = torch.cdist(weighted_pred_B, weighted_target, p=2)
-            cost_mat = torch.min(cost_mat_A, cost_mat_B)
+            cost_matrix = torch.cdist(pred_nodes[b] * self.f_w,
+                                      target_nodes[b] * self.f_w, p=2).cpu().detach().numpy()  # (N, N)
 
-            # Step 2: Apply Hungarian algorithm to find best matches
-            row_ind, col_ind = linear_sum_assignment(cost_mat)
+            # Step 2: Apply Hungarian algorithm to find best node matches
+            row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
             # Step 3: Compute node feature loss for matched pairs
-            losses.append(self.base_loss(pred_seq[b][row_ind], target_seq[b][col_ind]))
+            losses.append(self.base_loss(pred_nodes[b][row_ind], target_nodes[b][col_ind]))
 
         return torch.stack(losses).sum()
 
