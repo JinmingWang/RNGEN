@@ -54,7 +54,7 @@ class AttentionBlock(nn.Module):
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, mask=None):
         B, N, in_c = x.shape
 
         q, k, v = self.qkv_proj(x).split([self.d_q, self.d_k, self.d_v], dim=-1)
@@ -63,7 +63,10 @@ class AttentionBlock(nn.Module):
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        attn = torch.softmax(q @ kt * self.scale, dim=-1)
+        attn = q @ kt * self.scale
+        if mask is not None:
+            attn = attn.masked_fill(mask, float('-inf'))
+        attn = torch.softmax(attn, dim=-1)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)

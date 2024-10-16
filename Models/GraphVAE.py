@@ -63,32 +63,42 @@ class GraphEncoder(nn.Module):
 
 class GraphDecoder(nn.Module):
     def __init__(self, d_latent: int, d_head: int, d_expand: int, d_hidden: int, n_heads: int,
-                 n_layers: int, dropout: float = 0.1):
+                 n_layers: int, n_nodes: int, dropout: float = 0.1):
         super(GraphDecoder, self).__init__()
         # input shape: (B, N_segs, d_latent)
         self.latent_proj = nn.Linear(d_latent, d_hidden)
 
-        self.attention_blocks = nn.ModuleList([
+        self.attention_blocks = nn.Sequential(*[
             AttentionBlock(d_hidden, d_head, d_expand, d_hidden, n_heads, dropout)
             for _ in range(n_layers)
         ])
 
-        self.nodes_head = nn.Sequential(
-            Rearrange("B N (P D)", "B (P N) D", P=2),   # (B, N_nodes, d_hidden//2)
+        # generate a mask for the nodes
+        # for two nodes i and j, if they are related, both attn[i, j] and attn[j, i] should be high
+        # however, we want only one of them to be high, the other should be discarded
+        # thus, we generate a mask to zero out the lower triangular part of the adjacency matrix
+        self.register_buffer("mask", torch.triu(torch.ones(n_nodes, n_nodes), diagonal=0))
+
+        self.nodes_branch = nn.ModuleList([
             AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout),
             AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout),
-            nn.Linear(d_hidden//2, 3)
-        )
+            AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout),
+        ])
+
+        self.nodes_head = nn.Linear(d_hidden//2, 3)
 
         self.segments_head = nn.Linear(d_hidden, 5)
 
     def forward(self, z):
         x = self.latent_proj(z)  # Project latent vector to hidden dimension
-        for attn_block in self.attention_blocks:
-            x = attn_block(x)  # Pass through each attention block
+        x = self.attention_blocks(x)
+        x = rearrange(x, "B N (P D) -> B P N D", P=2)  # (B, N_nodes, d_hidden//2)
 
-        nodes = self.nodes_head(x)
         segs = self.segments_head(x)
+
+        for block in self.nodes_branch:
+            x = block(x, mask=self.mask)
+        nodes = self.nodes_head(x)
 
         # nodes: (B, N_nodes, 3), segs: (B, N_segs, 5)
         nodes[..., 2] = torch.sigmoid(nodes[..., 2])  # Sigmoid for the node type
