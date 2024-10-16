@@ -1,5 +1,5 @@
 from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.segment_model.configs import *
+from TrainEvalTest.path_encoder.configs import *
 from TrainEvalTest.Utils import *
 
 import torch
@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import PathEncoder, HungarianLoss, HungarianMode
+from Models import PathEncoder
 
 
 def train():
@@ -22,8 +22,6 @@ def train():
 
     # Models
     encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH).to(DEVICE)
-    torch.set_float32_matmul_precision('high')
-    encoder = torch.compile(encoder)
 
     loss_func = torch.nn.MSELoss()
 
@@ -66,7 +64,7 @@ def train():
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
 
-            plot_manager.plotSegments(batch["graph"][0], 0, 0, "Graph")
+            plot_manager.plotSegments(batch["graphs"][0], 0, 0, "Graph")
             plot_manager.plotTrajs(batch["trajs"][0], 0, 1, "Trajs")
             plot_manager.plotTrajs(batch["paths"][0], 1, 0, "Paths")
             plot_manager.plotTrajs(pred_paths[0], 1, 1, "Reconstructed Paths")

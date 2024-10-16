@@ -79,8 +79,8 @@ class PlotManager:
 
         # Extract the points for each line segment
         for seg in segs:
-            x = seg[:, 0].cpu().numpy()  # X coordinates
-            y = seg[:, 1].cpu().numpy()  # Y coordinates
+            x = seg[:, 0].cpu().detach().numpy()  # X coordinates
+            y = seg[:, 1].cpu().detach().numpy()  # Y coordinates
             ax.plot(x, y, marker='.', linestyle='-', color='#63B2EE', markersize=10, markerfacecolor='#76DA91',
                     lw=2)
 
