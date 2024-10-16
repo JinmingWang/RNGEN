@@ -2,7 +2,7 @@ from .Basics import *
 
 # This encoder splits the trajectories into sub-trajectories
 class Stage(nn.Sequential):
-    def __init__(self, N_trajs: int, L_traj: int, L_segment: int, D_token: int):
+    def __init__(self, N_trajs: int, L_traj: int, L_segment: int, D_token: int, downsample: bool = False):
         self.N_trajs = N_trajs
         self.L_traj = L_traj
         self.L_segment = L_segment
@@ -18,6 +18,8 @@ class Stage(nn.Sequential):
             Rearrange("B N (L C)", "(B N) C L", L=L_traj),
             Res1D(D_token, D_token * 4, D_token),
             Res1D(D_token, D_token * 4, D_token),
+
+            nn.Conv1d(D_token, D_token * (1 + int(downsample)), 3, 1 + int(downsample), 1),
         )
 
 
@@ -35,13 +37,14 @@ class PathEncoder(nn.Module):
             Res1D(2, 64, 16),
             Res1D(16, 64, 16),
             nn.Conv1d(16, 8, 3, 2, 1),
+            # (BN, C=8, L=32)
         )
 
         # (BN, C=8, L=64)
 
-        self.s1 = Stage(N_trajs, L_traj // 2, 4, 8)     # (BN, C=4, L=32)
+        self.s1 = Stage(N_trajs, L_traj // 2, 4, 8, True)     # (BN, C=16, L=16)
 
-        self.s2 = Stage(N_trajs, L_traj // 2, 4, 8)     # (BN, C=4, L=32)
+        self.s2 = Stage(N_trajs, L_traj // 4, 4, 16)     # (BN, C=16, L=16)
 
         self.head = nn.Sequential(
             Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)
