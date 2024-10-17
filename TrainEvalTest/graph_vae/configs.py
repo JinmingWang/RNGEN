@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "GVAE"
+COMMENT = "SegsJoints"
 
 # Training Parameters
 D_LATENT = 16

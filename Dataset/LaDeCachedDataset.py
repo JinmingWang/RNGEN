@@ -151,6 +151,35 @@ class LaDeCachedDataset(Dataset):
 
         return {"nodes": nodes_padded_tensor, "adj_mats": adj_padded_tensor, "n_nodes": nodes_count_tensor}
 
+
+    @staticmethod
+    def getJointsFromSegments(segments) -> Dict[str, Tensor]:
+        """
+        Computes the adjacency (joint) matrix for a batch of line segments.
+
+        Args:
+            segments (torch.Tensor): A tensor of shape (B, N, D), where D=5 (x1, y1, x2, y2, flag).
+
+        Returns:
+            torch.Tensor: A joint matrix of shape (B, N, N) where each entry (i, j) is 1 if segments i and j are joint, 0 otherwise.
+        """
+        B, N, _ = segments.shape
+
+        p1 = segments[:, :, 0:2]    # (B, N, 2)
+        p2 = segments[:, :, 2:4]    # (B, N, 2)
+
+        # p1p1_match[i, j] = 1 if p1[i] == p1[j]
+        p1p1_match = torch.cdist(p1, p1) < 1e-5   # (B, N, N)
+        p1p2_match = torch.cdist(p1, p2) < 1e-5   # (B, N, N)
+        p2p1_match = torch.cdist(p2, p1) < 1e-5   # (B, N, N)
+        p2p2_match = torch.cdist(p2, p2) < 1e-5   # (B, N, N)
+
+        # Combine the matches
+        joint_matrix = p1p1_match | p1p2_match | p2p1_match | p2p2_match
+
+        return {"joints": joint_matrix.to(torch.float32)}
+
+
     @staticmethod
     def xyxy2xydl(xyxy: Tensor) -> Tensor:
         """
