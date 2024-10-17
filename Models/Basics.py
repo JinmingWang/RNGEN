@@ -13,7 +13,7 @@ class Swish(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int, dropout: float=0.1):
+    def __init__(self, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int, dropout: float=0.1, mask: bool=False):
         super(AttentionBlock, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -25,6 +25,7 @@ class AttentionBlock(nn.Module):
         self.d_in = d_in
         self.scale = d_head ** -0.5
         self.dropout = nn.Dropout(dropout)
+        self.mask = mask
 
         self.d_q = d_head * n_heads
         self.d_k = d_head * n_heads
@@ -54,7 +55,7 @@ class AttentionBlock(nn.Module):
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
-    def forward(self, x, mask=None):
+    def forward(self, x):
         B, N, in_c = x.shape
 
         q, k, v = self.qkv_proj(x).split([self.d_q, self.d_k, self.d_v], dim=-1)
@@ -64,8 +65,9 @@ class AttentionBlock(nn.Module):
 
         # attn shape: (B*H, N, N)
         attn = q @ kt * self.scale
-        if mask is not None:
-            attn = attn.masked_fill(mask, float('-inf'))
+        if self.mask:
+            upper_mask = torch.triu(torch.ones(1, N, N, device=x.device, dtype=torch.bool), diagonal=1)
+            attn = attn.masked_fill(upper_mask, float('-inf'))
         attn = torch.softmax(attn, dim=-1)
         attn = self.dropout(attn)
 
@@ -76,9 +78,72 @@ class AttentionBlock(nn.Module):
         return self.ff(x) + self.shortcut(x)
 
 
-class CrossAttentionBlock(nn.Module):
-    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int, d_out: int, d_time: int, n_heads: int, dropout: float=0.1):
-        super(CrossAttentionBlock, self).__init__()
+class CrossAttnBlock(nn.Module):
+    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int,
+                 d_out: int, n_heads: int, dropout: float=0.1):
+        super(CrossAttnBlock, self).__init__()
+
+        # in shape: (B, N, in_c)
+        # Q shape: (B*H, N, head_c)
+        # K shape: (B*H, N, head_c)
+        # V shape: (B*H, N, in_c)
+        self.H = n_heads
+        self.d_head = d_head
+        self.d_in = d_in
+        self.scale = d_head ** -0.5
+        self.dropout = nn.Dropout(dropout)
+
+        self.q_proj = nn.Sequential(
+            nn.LayerNorm(d_in),
+            nn.Linear(d_in, d_head * n_heads),
+        )
+
+        self.kv_proj = nn.Sequential(
+            nn.LayerNorm(d_context),
+            nn.Linear(d_context, (d_head + d_in) * n_heads),
+        )
+
+        self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
+        torch.nn.init.zeros_(self.merge_head_proj.weight)
+        torch.nn.init.zeros_(self.merge_head_proj.bias)
+
+        self.ff = nn.Sequential(
+            nn.LayerNorm(d_in),
+            nn.Linear(d_in, d_expand),
+            Swish(),
+            nn.Dropout(dropout),
+            nn.Linear(d_expand, d_out),
+        )
+
+        torch.nn.init.zeros_(self.ff[-1].weight)
+        torch.nn.init.zeros_(self.ff[-1].bias)
+
+        self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
+
+    def forward(self, x, context):
+        B, N, in_c = x.shape
+
+        q = rearrange(self.q_proj(x), 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
+
+        k, v = self.kv_proj(context).split([self.d_head * self.H, in_c * self.H], dim=-1)
+        kt = rearrange(k, 'B N (H C) -> (B H) C N', H=self.H)   # (B*H, head_c, N)
+        v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
+
+        # attn shape: (B*H, N, N)
+        attn = torch.bmm(q, kt) * self.scale
+        attn = func.softmax(attn, dim=-1)
+        attn = self.dropout(attn)
+
+        # out shape: (B, N, H*in_c)
+        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        x = x + self.merge_head_proj(out)
+
+        return self.ff(x) + self.shortcut(x)
+
+class CrossAttentionBlockWithTime(nn.Module):
+    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int,
+                 d_out: int, d_time: int, n_heads: int, dropout: float=0.1):
+        super(CrossAttentionBlockWithTime, self).__init__()
 
         # in shape: (B, N, in_c)
         # Q shape: (B*H, N, head_c)

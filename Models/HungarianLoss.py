@@ -54,8 +54,8 @@ class HungarianLoss(nn.Module):
                 edge_losses.append(edge_loss)
 
         # Combine node and edge losses
-        node_loss = torch.stack(losses).sum()
-        edge_loss = torch.stack(edge_losses).sum()  # Combine edge and node losses
+        node_loss = torch.stack(losses).mean()
+        edge_loss = torch.stack(edge_losses).mean()  # Combine edge and node losses
 
         return node_loss, edge_loss
 
@@ -85,7 +85,7 @@ class HungarianLoss(nn.Module):
             loss_second_seq = self.base_loss(second_pred[b][row_ind], second_target[b][col_ind])
             losses.append(loss_first_seq + loss_second_seq)
 
-        return torch.stack(losses).sum()
+        return torch.stack(losses).mean()
 
     def forward_Seq(self, pred_nodes, target_nodes):
         B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
@@ -102,7 +102,7 @@ class HungarianLoss(nn.Module):
             # Step 3: Compute node feature loss for matched pairs
             losses.append(self.base_loss(pred_nodes[b][row_ind], target_nodes[b][col_ind]))
 
-        return torch.stack(losses).sum()
+        return torch.stack(losses).mean()
 
     def forward(self, *args, **kwargs):
         match (self.mode):

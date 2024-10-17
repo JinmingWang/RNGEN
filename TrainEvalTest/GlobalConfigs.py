@@ -5,7 +5,7 @@ DATA_DIR = "./Dataset/Shanghai_10k_Lv1"
 
 #
 N_TRAJS = 32
-N_NODES = 70    # In shanghai, maximum number of nodes is 65
+N_NODES = 128    # In shanghai, maximum number of nodes is 65
 N_SEGS = 64
 L_TRAJ = 64
 L_PATH = 9

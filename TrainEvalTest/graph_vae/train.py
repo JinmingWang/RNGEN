@@ -21,12 +21,16 @@ def train():
 
     # Models
     encoder = GraphEncoder(d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
-                           d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=N_LAYERS, dropout=0.0).to(DEVICE)
+                           d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=8, dropout=0.0).to(DEVICE)
     decoder = GraphDecoder(d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
-                           d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=N_LAYERS, dropout=0.0).to(DEVICE)
+                           d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=4, dropout=0.0).to(DEVICE)
+
+    torch.set_float32_matmul_precision('high')
+    encoder = torch.compile(encoder)
+    decoder = torch.compile(decoder)
 
     kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
-    hu_loss_func = HungarianLoss(mode=HungarianMode.Seq)
+    hu_loss_func = HungarianLoss(mode=HungarianMode.Seq, feature_weight=[1.0, 1.0, 0.0])
     mse_loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
@@ -81,10 +85,14 @@ def train():
 
                 # Backpropagation
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(decoder.parameters(), 1.0)
                 optimizer.step()
 
                 total_loss += loss
                 global_step += 1
+                if kl_loss.item() >= 0.1:
+                    continue
                 mov_avg_kld.update(kl_loss)
                 mov_avg_nodes.update(nodes_loss)
                 mov_avg_segs.update(segs_loss)
