@@ -1,31 +1,32 @@
 from .Basics import *
 
-class EdgeBlock(nn.Module):
-    def __init__(self, d_in: int, d_out: int, d_head: int):
+class MultiHeadSelfRelationMatrix(nn.Module):
+    def __init__(self, d_in: int, d_out: int, n_head: int, d_head: int):
         super().__init__()
 
         self.d_in = d_in
         self.d_out = d_out
+        self.n_head = n_head
         self.d_head = d_head
         self.scale = self.d_head ** -0.5
 
-        self.edge_proj = nn.Linear(d_in, d_out * d_head * 2)
-        self.adj_mat_proj = nn.Sequential(
-            nn.Conv2d(d_out, d_out, 1, 1, 0),
+        self.qk_proj = nn.Linear(d_in, n_head * d_head * 2)
+        self.head_compressor = nn.Sequential(
+            nn.Conv2d(d_head, d_out, 1, 1, 0),
             Swish(),
             nn.Conv2d(d_out, d_out, 1, 1, 0),
         )
 
     def forward(self, f_nodes):
         # src and dst: (B, N_nodes, d_out * d_head)
-        src, dst = self.edge_proj(f_nodes).split(self.d_out * self.d_head, dim=-1)
-        src = rearrange(src, "B N (O C) -> (B O) N C", O=self.d_out)  # (B*O, N_nodes, C)
-        dst = rearrange(dst, "B N (O C) -> (B O) C N", O=self.d_out)  # (B*O, C, N_nodes)
+        q, k = self.qk_proj(f_nodes).split(self.n_head * self.d_head, dim=-1)
+        q = rearrange(q, "B N (H C) -> (B H) N C", H=self.n_head)  # (B*O, N_nodes, C)
+        kt = rearrange(k, "B N (H C) -> (B H) C N", H=self.n_head)  # (B*O, C, N_nodes)
 
         # mat: (B, O, N_nodes, N_nodes)
-        mat = rearrange(src @ dst, "(B O) H W -> B O H W", O=self.d_out)  # (B, O, N_nodes, N_nodes)
+        mat = rearrange(q @ kt * self.scale, "(B H) R C -> B H R C", O=self.d_head)  # (B, O, N_nodes, N_nodes)
 
-        return self.adj_mat_proj(mat)   # (B, O, N_nodes, N_nodes)
+        return self.head_compressor(mat)   # (B, O, N_nodes, N_nodes)
 
 
 class GraphEncoder(nn.Module):
@@ -73,12 +74,19 @@ class GraphDecoder(nn.Module):
             for _ in range(n_layers)
         ])
 
-        self.linear = nn.Linear(d_hidden * 2, d_hidden)
-        self.nodes_branch = nn.Sequential(*[
-            AttentionBlock(d_hidden//2, d_head, d_expand, d_hidden//2, n_heads, dropout)
-            for _ in range(n_layers)
-        ])
-        self.nodes_head = nn.Linear(d_hidden//2, 3)
+        self.joint_proj = nn.Sequential(
+            MultiHeadSelfRelationMatrix(d_hidden * 2, d_hidden, 32, 32),
+            nn.GroupNorm(8, d_hidden),
+            Swish(),
+            nn.Conv2d(d_hidden, 32, 1, 1, 0),
+            nn.GroupNorm(8, 32),
+            Swish(),
+            nn.Conv2d(32, 8, 1, 1, 0),
+            Swish(),
+            nn.Conv2d(8, 1, 1, 1, 0),
+            nn.Flatten(1, 2),
+            nn.Sigmoid()
+        )
 
         self.segments_head = nn.Sequential(
             AttentionBlock(d_hidden * 2, d_head, d_expand, d_hidden, n_heads, dropout),
@@ -91,12 +99,8 @@ class GraphDecoder(nn.Module):
 
         segs = self.segments_head(x)
 
-        x = rearrange(self.linear(x), "B N (P D) -> B (P N) D", P=2)  # (B, N_nodes, d_hidden//2)
-        x = self.nodes_branch(x)
-        nodes = self.nodes_head(x)
+        joints = self.joint_proj(x)
 
-        # nodes: (B, N_nodes, 3), segs: (B, N_segs, 5)
-        nodes[..., 2] = torch.sigmoid(nodes[..., 2])  # Sigmoid for the node type
         segs[..., 4] = torch.sigmoid(segs[..., 4])    # Sigmoid for the valid mask
 
-        return nodes, segs
+        return segs, joints
