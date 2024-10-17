@@ -356,6 +356,59 @@ class MovingAvg():
         return len(self.values)
 
 
+def matchJoints(segments: torch.Tensor, joints: torch.Tensor) -> torch.Tensor:
+    # segs: (N, 5), joints: (N, N)
+    joints = (joints >= 0.5).to(torch.float32)
+    # remove diagonal
+    joints = joints - torch.eye(joints.shape[0], device=joints.device)
+
+    segs = segments[:, :4]  # Only use (x1, y1, x2, y2)
+    N = segs.shape[0]
+
+    for seg_i in range(N):
+        neighbor_ids = torch.nonzero(joints[seg_i]).flatten()  # Get neighbors for segment i
+        if len(neighbor_ids) == 0:
+            continue  # No neighbors, move to the next segment
+
+        # Compute pairwise distances between p1 and p2 of seg_i and the neighbors
+        dist_p1n1 = torch.norm(segs[seg_i, 0:2] - segs[neighbor_ids, 0:2], dim=1)  # Distance between p1 of seg_i and p1 of neighbors
+        dist_p1n2 = torch.norm(segs[seg_i, 0:2] - segs[neighbor_ids, 2:4], dim=1)  # Distance between p1 of seg_i and p2 of neighbors
+        dist_p2n1 = torch.norm(segs[seg_i, 2:4] - segs[neighbor_ids, 0:2], dim=1)  # Distance between p2 of seg_i and p1 of neighbors
+        dist_p2n2 = torch.norm(segs[seg_i, 2:4] - segs[neighbor_ids, 2:4], dim=1)  # Distance between p2 of seg_i and p2 of neighbors
+
+        # Stack the distances and find the minimum for each neighbor
+        distances = torch.stack([dist_p1n1, dist_p1n2, dist_p2n1, dist_p2n2], dim=0)  # Shape (4, N_i)
+        min_dist, min_idx = torch.min(distances, dim=0)  # Get minimum distance index for each neighbor
+
+        # Identify matching points
+        p1n1_match = min_idx == 0
+        p1n2_match = min_idx == 1
+        p2n1_match = min_idx == 2
+        p2n2_match = min_idx == 3
+
+        # Compute the mean of the matched points
+        p1_sum = segs[seg_i, 0:2] + segs[neighbor_ids][p1n1_match, 0:2].sum(dim=0) + segs[neighbor_ids][p1n2_match][:, 2:4].sum(dim=0)
+        p1_mean = p1_sum / (1 + p1n1_match.sum() + p1n2_match.sum())  # Take average
+
+        p2_sum = segs[seg_i, 2:4] + segs[neighbor_ids][p2n1_match, 0:2].sum(dim=0) + segs[neighbor_ids][p2n2_match][:, 2:4].sum(dim=0)
+        p2_mean = p2_sum / (1 + p2n1_match.sum() + p2n2_match.sum())  # Take average
+
+        # Update current segment's points
+        segs[seg_i, 0:2] = p1_mean
+        segs[seg_i, 2:4] = p2_mean
+
+        # Update the matched neighbors' points accordingly
+        segs[neighbor_ids[p1n1_match], 0:2] = p1_mean  # p1n1: update p2 of neighbors
+        segs[neighbor_ids[p1n2_match], 2:4] = p1_mean  # p1n2: update p1 of neighbors
+        segs[neighbor_ids[p2n1_match], 0:2] = p2_mean  # p2n1: update p2 of neighbors
+        segs[neighbor_ids[p2n2_match], 2:4] = p2_mean  # p2n2: update p1 of neighbors
+
+        # Mark processed neighbors to avoid double-processing
+        joints[neighbor_ids, seg_i] = 0
+
+    return torch.cat([segs, segments[:, 4:]], dim=-1)
+
+
 
 if __name__ == "__main__":
 

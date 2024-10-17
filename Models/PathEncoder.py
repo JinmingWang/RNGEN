@@ -24,12 +24,13 @@ class Stage(nn.Sequential):
 
 
 class PathEncoder(nn.Module):
-    def __init__(self, N_trajs: int, L_traj: int, L_path: int):
+    def __init__(self, N_trajs: int, L_traj: int, L_path: int, get_encoding: bool = False):
         super().__init__()
 
         self.N_trajs = N_trajs
         self.L_traj = L_traj
         self.L_path = L_path
+        self.get_encoding = get_encoding
 
         # input: (B, N, L, C=2)
         self.s0 = nn.Sequential(
@@ -61,5 +62,9 @@ class PathEncoder(nn.Module):
     def forward(self, x):
         x = self.s0(x)
         x = self.stages(x)
+        if self.get_encoding:
+            return rearrange(x, "(B N) C L -> B N (L C)", N=self.N_trajs)
+
+        # If we don't need the encoding, we just return the path
         x = self.head(x)
         return x

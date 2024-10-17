@@ -1,11 +1,15 @@
 
 from datetime import datetime
 
-COMMENT = "xydl_diffTrans"
+COMMENT = "PathEnc+GVAE"
+
+PATH_ENCODER_WEIGHT = ""
+GRAPH_VAE_WEIGHT = ""
+
+RELEASE_PATH_ENC = 10
 
 # Training Parameters
-LR_ENCODER = 2e-4
-LR_DIFFUSION = 2e-4
+LR = 2e-4
 LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 30
 LR_REDUCE_MIN = 1e-7

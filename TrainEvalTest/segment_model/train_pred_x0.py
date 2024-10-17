@@ -12,8 +12,32 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, Encoder, HungarianLoss, HungarianMode
+from Models import SegmentsModel, PathEncoder, HungarianLoss, HungarianMode, GraphEncoder, GraphDecoder
 from Diffusion import DDIM
+
+
+def prepareModels() -> Dict[str, torch.nn.Module]:
+    path_encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH, True).to(DEVICE)
+    graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
+    graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
+    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=32, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
+
+    torch.set_float32_matmul_precision('high')
+    path_encoder = torch.compile(path_encoder)
+    graph_encoder = torch.compile(graph_encoder)
+    graph_decoder = torch.compile(graph_decoder)
+    DiT = torch.compile(DiT)
+
+    # Load pre-trained path encoder, at the beginning of training, the path encoder is frozen
+    loadModels(PATH_ENCODER_WEIGHT, path_encoder)
+    path_encoder.eval()
+
+    # Load pre-trained graph VAE, it will be always frozen
+    loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
+    graph_encoder.eval()
+    graph_decoder.eval()
+
+    return {"path_encoder": path_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
 
 def train():
@@ -22,20 +46,18 @@ def train():
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
     # Models
-    encoder = Encoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
-    diffusion_net = SegmentsModel(n_seg=N_SEGS, d_seg=5, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
-    torch.set_float32_matmul_precision('high')
-    encoder = torch.compile(encoder)
-    diffusion_net = torch.compile(diffusion_net)
-    # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
+    models = prepareModels()
+
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss(HungarianMode.Seq, 'l1', [1.0, 1.0, 0.5, 1.0, 0.0])
+    loss_func = HungarianLoss(HungarianMode.Seq)
 
     # Optimizer & Scheduler
-    optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
-                       {"params": encoder.parameters(), "lr": LR_ENCODER}], lr=LR_DIFFUSION)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE, min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
+    optimizer = AdamW([
+        {"params": models["DiT"].parameters(), "lr": LR}],
+        lr=LR)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
+                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
     # Prepare Logging
     os.makedirs(LOG_DIR)
@@ -46,6 +68,9 @@ def train():
 
     with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
+            if e == RELEASE_PATH_ENC:
+                models["PathEncoder"].train()
+                optimizer.add_param_group({"params": models["PathEncoder"].parameters(), "lr": LR})
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
@@ -55,12 +80,14 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = LaDeCachedDataset.xyxy2xydl(segments)
 
-                noise = torch.randn_like(batch["segs"])
+                with torch.no_grad():
+                    batch["graph_enc"] = models["graph_encoder"](segments)
+
+                noise = torch.randn_like(batch["graph_enc"])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
-                noisy_segs = ddim.diffusionForward(batch["segs"], t, noise)
+                noisy_graph_enc = ddim.diffusionForward(batch["graph_enc"], t, noise)
 
                 # s = t - 1
                 # less_noisy_segs = torch.zeros_like(noisy_segs)
@@ -68,18 +95,19 @@ def train():
                 # less_noisy_segs[t==0] = batch["segs"][t==0]
 
                 optimizer.zero_grad()
-                traj_enc = encoder(batch["trajs"])
-                pred_segs = diffusion_net(noisy_segs, traj_enc, t)
+
+                traj_enc = models["path_encoder"](batch["trajs"])
+                pred_graph_enc = models["DiT"](noisy_graph_enc, traj_enc, t)
 
                 # pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
 
-                loss = loss_func(pred_segs, batch["segs"])
+                loss = loss_func(pred_graph_enc, batch["graph_enc"])
 
                 loss.backward()
 
                 # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1.0)
-                torch.nn.utils.clip_grad_norm_(diffusion_net.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["Dit"].parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["path_encoder"].parameters(), 1.0)
 
                 optimizer.step()
 
@@ -94,14 +122,14 @@ def train():
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
                 if global_step % EVAL_INTERVAL == 0:
-                    figure, eval_loss = eval(batch, encoder, diffusion_net, ddim)
+                    figure, eval_loss = eval(batch, models, ddim)
                     writer.add_figure("Evaluation", figure, global_step)
                     writer.add_scalar("loss/eval", eval_loss.item(), global_step)
 
-            saveModels(LOG_DIR + "last.pth", encoder, diffusion_net)
+            saveModels(LOG_DIR + "last.pth", models["DiT"], models["path_encoder"])
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(LOG_DIR + "best.pth", encoder, diffusion_net)
+                saveModels(LOG_DIR + "best.pth", models["DiT"], models["path_encoder"])
 
             lr_scheduler.step(total_loss)
 
