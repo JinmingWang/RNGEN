@@ -127,9 +127,11 @@ class PlotManager:
         if heatmap.ndim == 3:  # Shape (1, H, W)
             heatmap = heatmap.squeeze(0)
 
-        heatmap_np = heatmap.cpu().numpy()
+        heatmap_np = heatmap.cpu().detach().numpy()
         cax = ax.imshow(heatmap_np, origin='lower', cmap='coolwarm')
-        self.fig.colorbar(cax, ax=ax)
+        if not hasattr(self.axs[row, col], 'has_color_bar'):
+            self.fig.colorbar(cax, ax=ax)
+            ax.has_color_bar = True
 
         ax.axis('off')
 
@@ -148,18 +150,18 @@ class PlotManager:
 
         node_validity = nodes[:, 2].cpu().detach().numpy()
 
-        ax.scatter(nodes[:, 0].cpu().numpy(), nodes[:, 1].cpu().numpy(),
+        ax.scatter(nodes[:, 0].cpu().detach().numpy(), nodes[:, 1].cpu().detach().numpy(),
                    color='#76DA91', s=20 * node_validity, edgecolors='#63B2EE')
 
         # Plot connections based on adjacency matrix
-        adj_np = adj_mat.cpu().numpy()
+        adj_np = adj_mat.cpu().detach().numpy()
         num_nodes = len(nodes)
 
         for i in range(num_nodes):
             for j in range(i + 1, num_nodes):
                 if adj_np[i, j] == 1:
-                    p1 = nodes[i, :2].cpu().numpy()
-                    p2 = nodes[j, :2].cpu().numpy()
+                    p1 = nodes[i, :2].cpu().detach().numpy()
+                    p2 = nodes[j, :2].cpu().detach().numpy()
                     ax.plot([p1[0], p2[0]], [p1[1], p2[1]], linestyle='-', color='#63B2EE', lw=1)
 
         ax.set_xlim([-3, 3])
