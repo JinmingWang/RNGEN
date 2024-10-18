@@ -20,22 +20,23 @@ def prepareModels() -> Dict[str, torch.nn.Module]:
     path_encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH, True).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=32, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
-
-    torch.set_float32_matmul_precision('high')
-    path_encoder = torch.compile(path_encoder)
-    graph_encoder = torch.compile(graph_encoder)
-    graph_decoder = torch.compile(graph_decoder)
-    DiT = torch.compile(DiT)
-
-    # Load pre-trained path encoder, at the beginning of training, the path encoder is frozen
-    loadModels(PATH_ENCODER_WEIGHT, path_encoder)
-    path_encoder.eval()
+    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=128, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
 
     # Load pre-trained graph VAE, it will be always frozen
     loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
     graph_encoder.eval()
     graph_decoder.eval()
+
+    # Load pre-trained path encoder, at the beginning of training, the path encoder is frozen
+    if PATH_ENCODER_WEIGHT != "":
+        loadModels(PATH_ENCODER_WEIGHT, path_encoder)
+    path_encoder.eval()
+
+    # torch.set_float32_matmul_precision('high')
+    # path_encoder = torch.compile(path_encoder)
+    # graph_encoder = torch.compile(graph_encoder)
+    # graph_decoder = torch.compile(graph_decoder)
+    # DiT = torch.compile(DiT)
 
     return {"path_encoder": path_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
@@ -54,7 +55,9 @@ def train():
 
     # Optimizer & Scheduler
     optimizer = AdamW([
-        {"params": models["DiT"].parameters(), "lr": LR}],
+        {"params": models["DiT"].parameters(), "lr": LR},
+        {"params": models["path_encoder"].parameters(), "lr":1e-7}
+        ],
         lr=LR)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
                                      min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
@@ -69,8 +72,8 @@ def train():
     with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
             if e == RELEASE_PATH_ENC:
-                models["PathEncoder"].train()
-                optimizer.add_param_group({"params": models["PathEncoder"].parameters(), "lr": LR})
+                models["path_encoder"].train()
+                optimizer.add_param_group({"params": models["path_encoder"].parameters(), "lr": LR})
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
@@ -80,9 +83,10 @@ def train():
                 valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
                 # add a dimension for segments indicating if it's a valid segment or padding
                 segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
+                batch["segs"] = segments
 
                 with torch.no_grad():
-                    batch["graph_enc"] = models["graph_encoder"](segments)
+                    batch["graph_enc"], _ = models["graph_encoder"](segments)
 
                 noise = torch.randn_like(batch["graph_enc"])
 
@@ -106,7 +110,7 @@ def train():
                 loss.backward()
 
                 # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(models["Dit"].parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.0)
                 torch.nn.utils.clip_grad_norm_(models["path_encoder"].parameters(), 1.0)
 
                 optimizer.step()
@@ -121,10 +125,10 @@ def train():
                     writer.add_scalar("loss/Loss", mov_avg_loss.get(), global_step)
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
-                if global_step % EVAL_INTERVAL == 0:
-                    figure, eval_loss = eval(batch, models, ddim)
-                    writer.add_figure("Evaluation", figure, global_step)
-                    writer.add_scalar("loss/eval", eval_loss.item(), global_step)
+            if e % EVAL_INTERVAL == 0:
+                figure, eval_loss = eval(batch, models, ddim)
+                writer.add_figure("Evaluation", figure, global_step)
+                writer.add_scalar("loss/eval", eval_loss.item(), global_step)
 
             saveModels(LOG_DIR + "last.pth", models["DiT"], models["path_encoder"])
             if total_loss < best_loss:

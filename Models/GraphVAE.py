@@ -10,8 +10,8 @@ class MultiHeadSelfRelationMatrix(nn.Module):
         self.d_head = d_head
         self.scale = self.d_head ** -0.5
 
-        self.qk_proj = nn.Linear(d_in, n_head * d_head * 2)
-        self.head_compressor = nn.Sequential(
+        self.edge_proj = nn.Linear(d_in, n_head * d_head * 2)
+        self.adj_mat_proj = nn.Sequential(
             nn.Conv2d(d_head, d_out, 1, 1, 0),
             Swish(),
             nn.Conv2d(d_out, d_out, 1, 1, 0),
@@ -19,14 +19,14 @@ class MultiHeadSelfRelationMatrix(nn.Module):
 
     def forward(self, f_nodes):
         # src and dst: (B, N_nodes, d_out * d_head)
-        q, k = self.qk_proj(f_nodes).split(self.n_head * self.d_head, dim=-1)
+        q, k = self.edge_proj(f_nodes).split(self.n_head * self.d_head, dim=-1)
         q = rearrange(q, "B N (H C) -> (B H) N C", H=self.n_head)  # (B*O, N_nodes, C)
         kt = rearrange(k, "B N (H C) -> (B H) C N", H=self.n_head)  # (B*O, C, N_nodes)
 
         # mat: (B, O, N_nodes, N_nodes)
-        mat = rearrange(q @ kt * self.scale, "(B H) R C -> B H R C", O=self.d_head)  # (B, O, N_nodes, N_nodes)
+        mat = rearrange(q @ kt * self.scale, "(B H) R C -> B H R C", H=self.d_head)  # (B, O, N_nodes, N_nodes)
 
-        return self.head_compressor(mat)   # (B, O, N_nodes, N_nodes)
+        return self.adj_mat_proj(mat)   # (B, O, N_nodes, N_nodes)
 
 
 class GraphEncoder(nn.Module):

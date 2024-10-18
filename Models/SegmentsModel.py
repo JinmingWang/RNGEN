@@ -93,15 +93,15 @@ class SegmentsModel(nn.Module):
 
         # x: (B, N_segs, 512)
         out = self.head(x)
-        if self.pred_x0:
-            x_center, y_center, direction, length, valid_mask = torch.unbind(out, dim=-1)
-            segs = torch.stack([
-                x_center,
-                y_center,
-                torch.sigmoid(direction) * torch.pi,
-                length,
-                torch.sigmoid(valid_mask)
-            ], dim=-1)
-            return segs
+        # if self.pred_x0:
+        #     x_center, y_center, direction, length, valid_mask = torch.unbind(out, dim=-1)
+        #     segs = torch.stack([
+        #         x_center,
+        #         y_center,
+        #         torch.sigmoid(direction) * torch.pi,
+        #         length,
+        #         torch.sigmoid(valid_mask)
+        #     ], dim=-1)
+        #     return segs
 
         return out

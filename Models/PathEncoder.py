@@ -63,7 +63,7 @@ class PathEncoder(nn.Module):
         x = self.s0(x)
         x = self.stages(x)
         if self.get_encoding:
-            return rearrange(x, "(B N) C L -> B N (L C)", N=self.N_trajs)
+            return self.head[1](self.head[0](x))
 
         # If we don't need the encoding, we just return the path
         x = self.head(x)

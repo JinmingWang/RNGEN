@@ -31,16 +31,18 @@ def eval(batch: Dict[str, Tensor], models: Dict[str, torch.nn.Module], ddim: DDI
 
         pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
 
-    pred_segs_jointed = matchJoints(pred_segs, pred_joints)
+    pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
 
-    loss = HungarianLoss(HungarianMode.Seq)(pred_segs_jointed, batch["segs"])
+    loss = HungarianLoss(HungarianMode.Seq)(pred_segs, batch["segs"])
+
+    joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
 
     plot_manager = PlotManager(5, 2, 3)
     plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
-    plot_manager.plotSegments(pred_segs[0].reshape(-1, 2, 2), 0, 1, "Pred segs")
-    plot_manager.plotSegments(pred_segs_jointed[0].reshape(-1, 2, 2), 0, 2, f"Pred segs jointed (Loss: {loss.item():.3e})")
+    plot_manager.plotSegments(pred_segs[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
+    plot_manager.plotSegments(pred_segs_jointed, 0, 2, "Pred segs jointed")
     plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
-    plot_manager.plotHeatmap(batch["joints"][0], 1, 1, "Joints")
+    plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
     plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
 
     for name in models:
