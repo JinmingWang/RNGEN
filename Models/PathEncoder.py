@@ -50,21 +50,21 @@ class PathEncoder(nn.Module):
             Stage(N_trajs, L_traj // 4, 4, 32),
         )
 
-        self.head = nn.Sequential(
-            Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)
-            nn.Linear(L_traj * 8, 128),
-            AttentionBlock(d_in=128, d_out=64, d_head=64, n_heads=8, d_expand=256),
-            AttentionBlock(d_in=64, d_out=L_path * 2, d_head=64, n_heads=8, d_expand=256),
-            nn.Linear(L_path * 2, L_path * 2),
-            Rearrange("B N (L C)", "B N L C", L=L_path),
-        )
+        if self.get_encoding:
+            # L*C = L_traj // 4 * 32 = L_traj * 8
+            # if L_Traj = 64, then L*C = 512
+            self.head = Rearrange("(B N) C L", "B N (L C)", N=N_trajs)
+        else:
+            self.head = nn.Sequential(
+                Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)
+                nn.Linear(L_traj * 8, 128),
+                AttentionBlock(d_in=128, d_out=64, d_head=64, n_heads=8, d_expand=256),
+                AttentionBlock(d_in=64, d_out=L_path * 2, d_head=64, n_heads=8, d_expand=256),
+                nn.Linear(L_path * 2, L_path * 2),
+                Rearrange("B N (L C)", "B N L C", L=L_path),
+            )
 
     def forward(self, x):
         x = self.s0(x)
         x = self.stages(x)
-        if self.get_encoding:
-            return self.head[1](self.head[0](x))
-
-        # If we don't need the encoding, we just return the path
-        x = self.head(x)
-        return x
+        return self.head(x)

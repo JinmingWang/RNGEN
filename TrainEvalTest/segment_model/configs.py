@@ -14,7 +14,7 @@ LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 30
 LR_REDUCE_MIN = 1e-7
 LR_REDUCE_THRESHOLD = 1e-5
-EPOCHS = 800
+EPOCHS = 2000
 B = 128
 LOG_DIR = f"./Runs/SegmentsModel/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{COMMENT}/"
 

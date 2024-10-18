@@ -20,7 +20,7 @@ def prepareModels() -> Dict[str, torch.nn.Module]:
     path_encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH, True).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=128, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
+    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=L_TRAJ*8, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
 
     # Load pre-trained graph VAE, it will be always frozen
     loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
@@ -73,7 +73,7 @@ def train():
         for e in range(EPOCHS):
             if e == RELEASE_PATH_ENC:
                 models["path_encoder"].train()
-                optimizer.add_param_group({"params": models["path_encoder"].parameters(), "lr": LR})
+                optimizer.param_groups[1]["lr"] = optimizer.param_groups[0]["lr"]
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
