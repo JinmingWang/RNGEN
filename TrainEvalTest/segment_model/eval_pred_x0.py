@@ -34,6 +34,7 @@ def eval(batch: Dict[str, Tensor], models: Dict[str, torch.nn.Module], ddim: DDI
     pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
 
     loss = HungarianLoss(HungarianMode.Seq)(pred_segs, batch["segs"])
+    # loss = torch.nn.functional.mse_loss(pred_segs, batch["segs"])
 
     joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
 

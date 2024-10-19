@@ -25,7 +25,7 @@ class TrajEncoder(nn.Module):
             nn.Conv1d(64, 128, 3, 2, 1),  # (BN, 128, 16)
 
             Rearrange("(B N) C L", "B (N L) C", N=N_trajs),
-            *[AttentionBlock(d_in=128, d_out=128, d_head=128, n_heads=8, d_expand=512) for _ in range(8)],
+            *[AttentionBlock(d_in=128, d_out=128, d_head=128, n_heads=8, d_expand=512) for _ in range(6)],
             nn.Linear(128, D_encode),
         )
 

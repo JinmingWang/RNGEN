@@ -48,7 +48,7 @@ def train():
 
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss(HungarianMode.Seq)
+    loss_func = torch.nn.MSELoss() #HungarianLoss(HungarianMode.Seq)
 
     # Optimizer & Scheduler
     optimizer = AdamW([

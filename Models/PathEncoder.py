@@ -44,10 +44,10 @@ class PathEncoder(nn.Module):
         # (BN, C=8, L=64)
 
         self.stages = nn.Sequential(
-            Stage(N_trajs, L_traj // 2, 4, 16, True),
-            Stage(N_trajs, L_traj // 4, 4, 32),
-            Stage(N_trajs, L_traj // 4, 4, 32),
-            Stage(N_trajs, L_traj // 4, 4, 32),
+            Stage(N_trajs, L_traj // 2, 4, 16),
+            Stage(N_trajs, L_traj // 2, 4, 16),
+            Stage(N_trajs, L_traj // 2, 4, 16),
+            Stage(N_trajs, L_traj // 2, 4, 32),
         )
 
         if self.get_encoding:

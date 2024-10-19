@@ -17,9 +17,9 @@ class Block(nn.Module):
         self.n_heads = n_heads
         self.dropout = dropout
 
-        self.ca = CrossAttentionBlockWithTime(d_in=d_in, d_context=d_traj_enc, d_head=d_out // 4, d_expand=d_out * 2,
+        self.ca = CrossAttentionBlockWithTime(d_in=d_in, d_context=d_traj_enc, d_head=d_out // 2, d_expand=d_out * 4,
                                         d_out=d_out, d_time=128, n_heads=self.n_heads, dropout=self.dropout)
-        self.sa = AttentionWithTime(d_in=d_out, d_head=d_out // 4, d_expand=d_out * 2, d_out=d_out,
+        self.sa = AttentionWithTime(d_in=d_out, d_head=d_out // 2, d_expand=d_out * 4, d_out=d_out,
                                       d_time=128, n_heads=self.n_heads, dropout=self.dropout)
 
     def forward(self, f_segs, traj_enc, t):
@@ -48,27 +48,10 @@ class SegmentsModel(nn.Module):
 
         self.linear = nn.Linear(d_seg, 64)
 
-        self.attn = AttentionWithTime(d_in=64, d_head=32, d_expand=128, d_out=64, d_time=128, n_heads=8, dropout=0.0)
+        self.attn = AttentionWithTime(d_in=64, d_head=32, d_expand=128, d_out=256, d_time=128, n_heads=8, dropout=0.0)
 
         self.stages = SequentialWithAdditionalInputs(
-
-            Block(64, 128, d_traj_enc, n_traj),
-            Block(128, 128, d_traj_enc, n_traj),
-
-            Block(128, 256, d_traj_enc, n_traj),
-            Block(256, 256, d_traj_enc, n_traj),
-
-            Block(256, 256, d_traj_enc, n_traj),
-            Block(256, 256, d_traj_enc, n_traj),
-
-            Block(256, 256, d_traj_enc, n_traj),
-            Block(256, 256, d_traj_enc, n_traj),
-
-            Block(256, 256, d_traj_enc, n_traj),
-            Block(256, 256, d_traj_enc, n_traj),
-
-            Block(256, 256, d_traj_enc, n_traj),
-            Block(256, 256, d_traj_enc, n_traj),
+            *[Block(256, 256, d_traj_enc, n_traj) for _ in range(6)]
         )
 
         self.head = nn.Sequential(
