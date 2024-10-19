@@ -3,12 +3,12 @@ import matplotlib.pyplot as plt
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.node_edge_model.configs import *
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss, HungarianMode, SegmentsModel, Encoder
+from Models import HungarianLoss, HungarianMode, SegmentsModel, TrajEncoder
 from Diffusion import DDPM
 
 import torch
 
-def eval(batch: Dict[str, Tensor], encoder: Encoder, diffusion_net: SegmentsModel, ddpm: DDPM) -> Tuple[plt.Figure, Tensor]:
+def eval(batch: Dict[str, Tensor], encoder: TrajEncoder, diffusion_net: SegmentsModel, ddpm: DDPM) -> Tuple[plt.Figure, Tensor]:
     """
     Evaluate the model on the given batch
     :param batch: The batch to evaluate

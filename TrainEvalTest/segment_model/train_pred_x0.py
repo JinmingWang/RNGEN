@@ -12,33 +12,30 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, PathEncoder, HungarianLoss, HungarianMode, GraphEncoder, GraphDecoder
+from Models import SegmentsModel, TrajEncoder, HungarianLoss, HungarianMode, GraphEncoder, GraphDecoder
 from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
-    path_encoder = PathEncoder(N_TRAJS, L_TRAJ, L_PATH, True).to(DEVICE)
+    traj_encoder = TrajEncoder(N_TRAJS, L_TRAJ, 128).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=L_TRAJ*8, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
+    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=128, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
 
     # Load pre-trained graph VAE, it will be always frozen
     loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
     graph_encoder.eval()
     graph_decoder.eval()
 
-    # Load pre-trained path encoder, at the beginning of training, the path encoder is frozen
-    if PATH_ENCODER_WEIGHT != "":
-        loadModels(PATH_ENCODER_WEIGHT, path_encoder)
-    path_encoder.eval()
+    traj_encoder.eval()
 
     # torch.set_float32_matmul_precision('high')
-    # path_encoder = torch.compile(path_encoder)
+    # traj_encoder = torch.compile(traj_encoder)
     # graph_encoder = torch.compile(graph_encoder)
     # graph_decoder = torch.compile(graph_decoder)
     # DiT = torch.compile(DiT)
 
-    return {"path_encoder": path_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
+    return {"traj_encoder": traj_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
 
 def train():
@@ -56,7 +53,7 @@ def train():
     # Optimizer & Scheduler
     optimizer = AdamW([
         {"params": models["DiT"].parameters(), "lr": LR},
-        {"params": models["path_encoder"].parameters(), "lr":1e-7}
+        {"params": models["traj_encoder"].parameters(), "lr":1e-7}
         ],
         lr=LR)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
@@ -72,7 +69,7 @@ def train():
     with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
             if e == RELEASE_PATH_ENC:
-                models["path_encoder"].train()
+                models["traj_encoder"].train()
                 optimizer.param_groups[1]["lr"] = optimizer.param_groups[0]["lr"]
             total_loss = 0
             for i, batch in enumerate(dataloader):
@@ -100,7 +97,7 @@ def train():
 
                 optimizer.zero_grad()
 
-                traj_enc = models["path_encoder"](batch["trajs"])
+                traj_enc = models["traj_encoder"](batch["trajs"])
                 pred_graph_enc = models["DiT"](noisy_graph_enc, traj_enc, t)
 
                 # pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
@@ -111,7 +108,7 @@ def train():
 
                 # Gradient Clipping
                 torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.0)
-                torch.nn.utils.clip_grad_norm_(models["path_encoder"].parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["traj_encoder"].parameters(), 1.0)
 
                 optimizer.step()
 
@@ -130,10 +127,10 @@ def train():
                 writer.add_figure("Evaluation", figure, global_step)
                 writer.add_scalar("loss/eval", eval_loss.item(), global_step)
 
-            saveModels(LOG_DIR + "last.pth", models["DiT"], models["path_encoder"])
+            saveModels(LOG_DIR + "last.pth", models["DiT"], models["traj_encoder"])
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(LOG_DIR + "best.pth", models["DiT"], models["path_encoder"])
+                saveModels(LOG_DIR + "best.pth", models["DiT"], models["traj_encoder"])
 
             lr_scheduler.step(total_loss)
 

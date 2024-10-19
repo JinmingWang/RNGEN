@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import NodeEdgeModel, Encoder, HungarianLoss, HungarianMode
+from Models import NodeEdgeModel, TrajEncoder, HungarianLoss, HungarianMode
 from Diffusion import DDPM
 
 
@@ -22,7 +22,7 @@ def train():
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
     # Models
-    encoder = Encoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
+    encoder = TrajEncoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
     diffusion_net = NodeEdgeModel(n_nodes=N_NODES, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
     # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
     ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")

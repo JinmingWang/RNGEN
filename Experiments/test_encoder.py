@@ -1,6 +1,9 @@
 import torch
-from Models import Encoder
+from Models import TrajEncoder
+from torchsummary import summary
 
-TAE = Encoder(N_trajs=64, L_traj=128, D_encode=32)
+TAE = TrajEncoder(N_trajs=32, L_traj=64, D_encode=64)
+
+summary(TAE, torch.randn(64, 32, 64, 2))
 
 torch.save(TAE.state_dict(), "encoder.pth")
