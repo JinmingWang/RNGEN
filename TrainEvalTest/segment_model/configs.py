@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "TrajEnc+GVAE_MSE"
+COMMENT = "PathEnc"
 
 PATH_ENCODER_WEIGHT = ""
 GRAPH_VAE_WEIGHT = "Runs/GraphVAE/20241017_043956_SegsJoints/last.pth"

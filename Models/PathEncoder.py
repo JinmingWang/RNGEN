@@ -47,7 +47,7 @@ class PathEncoder(nn.Module):
             Stage(N_trajs, L_traj // 2, 4, 16),
             Stage(N_trajs, L_traj // 2, 4, 16),
             Stage(N_trajs, L_traj // 2, 4, 16),
-            Stage(N_trajs, L_traj // 2, 4, 32),
+            Stage(N_trajs, L_traj // 2, 4, 16),
         )
 
         if self.get_encoding:
