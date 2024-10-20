@@ -17,10 +17,22 @@ from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
-    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, True).to(DEVICE)
+    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, 128).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=128, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
+    DiT = SegmentsModel(d_in=16, d_traj_enc=128, n_layers=12, T=T, pred_x0=True).to(DEVICE)
+
+    # Model-S:
+    # traj_encoder: d_encode = 128
+    # DiT: d_in = 16, d_traj_enc = 128, n_layers = 12
+
+    # Model-M:
+    # traj_encoder: d_encode = 192
+    # DiT: d_in = 16, d_traj_enc = 192, n_layers = 14
+
+    # Model-L:
+    # traj_encoder: d_encode = 256
+    # DiT: d_in = 16, d_traj_enc = 256, n_layers = 16
 
     # Load pre-trained graph VAE, it will be always frozen
     loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
@@ -47,13 +59,13 @@ def train():
     models = prepareModels()
 
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
+    loss_func = HungarianLoss(HungarianMode.Seq)
     # loss_func = torch.nn.MSELoss()
-    loss_func = torch.nn.MSELoss() #HungarianLoss(HungarianMode.Seq)
 
     # Optimizer & Scheduler
     optimizer = AdamW([
         {"params": models["DiT"].parameters(), "lr": LR},
-        {"params": models["traj_encoder"].parameters(), "lr":1e-7}
+        {"params": models["traj_encoder"].parameters(), "lr":LR}
         ],
         lr=LR)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
@@ -68,9 +80,6 @@ def train():
 
     with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
-            if e == RELEASE_PATH_ENC:
-                models["traj_encoder"].train()
-                optimizer.param_groups[1]["lr"] = optimizer.param_groups[0]["lr"]
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
