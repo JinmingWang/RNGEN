@@ -46,14 +46,17 @@ class PathEncoder(nn.Module):
         self.stages = nn.Sequential(
             Stage(N_trajs, L_traj // 2, 4, 16),
             Stage(N_trajs, L_traj // 2, 4, 16),
-            Stage(N_trajs, L_traj // 2, 4, 16),
-            Stage(N_trajs, L_traj // 2, 4, 16),
+            Stage(N_trajs, L_traj // 2, 4, 16, downsample=True),
+            Stage(N_trajs, L_traj // 4, 4, 32),
         )
 
         if self.get_encoding:
             # L*C = L_traj // 4 * 32 = L_traj * 8
             # if L_Traj = 64, then L*C = 512
-            self.head = Rearrange("(B N) C L", "B N (L C)", N=N_trajs)
+            self.head = nn.Sequential(
+                Res1D(32, 128, 128),
+                Rearrange("(B N) C L", "B (N L) C", N=N_trajs),
+            )
         else:
             self.head = nn.Sequential(
                 Rearrange("(B N) C L", "B N (L C)", N=N_trajs),     # (B, N, LC=512)

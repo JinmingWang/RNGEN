@@ -17,10 +17,10 @@ from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
-    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 21, True).to(DEVICE)
+    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, True).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=512, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
+    DiT = SegmentsModel(d_seg=16, n_seg=N_SEGS, d_traj_enc=128, n_traj=N_TRAJS, T=T, pred_x0=True).to(DEVICE)
 
     # Load pre-trained graph VAE, it will be always frozen
     loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
