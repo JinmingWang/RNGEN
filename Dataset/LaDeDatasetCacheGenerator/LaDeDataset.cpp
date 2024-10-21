@@ -201,9 +201,8 @@ void LaDeDataset::simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_l
     Tensor exclude_last = visiting_nodes.index({Slice(None, -1, 1)});
 
     Tensor pairwise_dist = torch::norm(exclude_first - exclude_last, 2, 1);
-    Tensor total_dist = torch::sum(pairwise_dist);
-//    Tensor distances = torch::cumsum(pairwise_dist, 0);
-//    distances = torch::cat({torch::zeros({1}, DEVICE), distances}, 0);
+    Tensor distances = torch::cumsum(pairwise_dist, 0);
+    distances = torch::cat({torch::zeros({1}, DEVICE), distances}, 0);
 
     // Simulate the random walk
 //    Tensor walked_dist = torch::zeros(1, DEVICE);
@@ -236,12 +235,24 @@ void LaDeDataset::simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_l
     So we can first generate L points uniformly along the path, then add noise to jitter the distances.
     Finally apply the traj_noise_std to simulate the GPS noise.
     */
-    traj_len = (int) (total_dist / (this->traj_step_mean + torch::randn({1}, DEVICE) * this->traj_step_std)).item<float>();
+    traj_len = (int) (distances[-1] / (this->traj_step_mean + torch::randn({1}, DEVICE) * this->traj_step_std)).item<float>();
     // t is the percentage of where the point is on the path
     Tensor t = torch::linspace(0, 1, num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_noise_std;
     // t must be sorted because noise adding may change the order
-    t = torch::sort(t).values;
-    Tensor traj_tensor = torch::interp(distances, visiting_nodes, t);
+    t = std::get<0>(torch::sort(t))
+    Tensor traj_tensor = torch::zeros({num_points, 2}, DEVICE);
+
+    // Iter all points
+    for (int i = 0; i < num_points; i++) {
+        Tensor current_t = t[i];
+        // Iter all segments
+        for (int j = 0; j < distances.size(0) - 1; j++) {
+            if (((distances[j] <= current_t).item<bool>() && (current_t < distances[j + 1]).item<bool>())) {
+                traj_tensor[i] = visiting_nodes[j] + (current_t - distances[j]) / pairwise_dist[j] * (visiting_nodes[j + 1] - visiting_nodes[j]);
+                break;
+            }
+        }
+    }
 
     Tensor gps_noise = torch::randn(traj_tensor.sizes(), DEVICE) * this->traj_noise_std;
 
