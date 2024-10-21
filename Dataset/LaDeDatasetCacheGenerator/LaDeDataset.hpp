@@ -33,6 +33,7 @@ private:
     Tensor candidate_nodes;
 
     SegmentGraph getGraph();
+    void removeBadNodes();
     void simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths, Tensor &traj_lengths, Tensor &path_lengths);
     void simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_len);
     Tensor getHeatmap(Tensor graph_tensor, Tensor traj_tensor, int H, int W);

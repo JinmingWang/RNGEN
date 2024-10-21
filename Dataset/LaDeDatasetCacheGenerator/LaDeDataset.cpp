@@ -30,6 +30,8 @@ LaDeDataset::LaDeDataset(std::string path,
     this->edges = generic_list.get(2).toTensor().to(DEVICE);
     this->degrees = generic_list.get(3).toTensor().to(DEVICE);
 
+    removeBadNodes();
+
     this->graph_depth = graph_depth;
     this->trajs_per_graph = trajs_per_graph;
     this->max_segs_per_graph = max_segs_per_graph;
@@ -43,6 +45,60 @@ LaDeDataset::LaDeDataset(std::string path,
     this->candidate_nodes = torch::where(this->degrees > 2)[0];
     cout << "Number of candidate nodes: " << this->candidate_nodes.size(0) << endl;
 }
+
+
+void LaDeDataset::removeBadNodes() {
+    // bad node definition: For node B, if it has only two neighbors A and C
+    // and the angle between BA and BC is less than 30 degrees
+    // this means ABC is almost a straight line, B is meaningless
+    // In this case, remove node B from nodes, degrees and edges
+    // Remove neighbor B from edges of A and C
+    // If A and C are already connected, reduce their degree by 1
+    // If A and C are not connected, connect them
+
+    for (int i = 0; i < this->nodes.size(0); i++) {
+        if (this->degrees[i].item<int>() == 2) {
+            int neighbor_1 = this->edges[i][0].item<int>();
+            int neighbor_2 = this->edges[i][1].item<int>();
+            Tensor node = this->nodes[i];
+            Tensor neighbor_1_node = this->nodes[neighbor_1];
+            Tensor neighbor_2_node = this->nodes[neighbor_2];
+            Tensor vec_1 = node - neighbor_1_node;
+            Tensor vec_2 = node - neighbor_2_node;
+            float cos_theta = torch::dot(vec_1, vec_2) / (torch::norm(vec_1) * torch::norm(vec_2)).item<float>();
+            Tensor degrees = torch::acos(cos_theta) * 180.0 / M_PI;
+            if (degrees < 30) {
+                // It is not wise to remove elements from a tensor, since it involves index shifting
+                // We can instead just remove edge AB and BC, then set the degree of B to 0
+                // This will make B an isolated node, which will never be involved in all later operations
+                this->edges[i] = torch::zeros_like(this->edges[i]);     // remove all edges of B
+                this->degrees[i] = 0;
+                // Remove B from the neighbors of A
+                int B_pos = torch::where(this->edges[neighbor_1] == i)[0].item<int>();
+                int last_pos = this->degrees[neighbor_1].item<int>() - 1;
+                // Move the last element to the position of B, then set the last element to 0
+                this->edges.index({neighbor_1, B_pos}) = this->edges.index({neighbor_1, last_pos});
+                this->edges.index({neighbor_1, last_pos}) = 0;
+
+                B_pos = torch::where(this->edges[neighbor_2] == i)[0].item<int>();
+                last_pos = this->degrees[neighbor_2].item<int>() - 1;
+                this->edges.index({neighbor_2, B_pos}) = this->edges.index({neighbor_2, last_pos});
+                this->edges.index({neighbor_2, last_pos}) = 0;
+
+                if (torch::where(this->edges[neighbor_1] == neighbor_2).size(0) == 0) {
+                    // Connect A and C if they are not connected
+                    // Degree does not change because B is removed
+                    this->edges[neighbor_1][this->degrees[neighbor_1]] = neighbor_2;
+                    this->edges[neighbor_2][this->degrees[neighbor_2]] = neighbor_1;
+                } else {
+                    this->degrees[neighbor_1] -= 1;
+                    this->degrees[neighbor_2] -= 1;
+                }
+            }
+        }
+    }
+}
+
 
 mat<string, Tensor> LaDeDataset::get() {
     SegmentGraph graph = this->getGraph();
