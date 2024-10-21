@@ -9,7 +9,7 @@ public:
     SegmentGraph(Tensor segments);
 
     std::vector<int> getNeighbors(Tensor node, std::vector<int> &exceptions);
-    std::vector<Tensor> getRandomPath(int start_segment_id);
+    void getRandomPath(Tensor &path, int &path_length);
     Tensor getCenter();
     void normalize();
     void transform(Tensor rotate_angle, Tensor scale_factor);
@@ -17,5 +17,8 @@ public:
     void draw(std::string color) const;
 
 private:
+    int min_path_length = 3;
+    int max_path_length = 10;
+
     std::vector<Tensor> growPath(std::vector<int> &visited_sid, std::vector<Tensor> path);
 };

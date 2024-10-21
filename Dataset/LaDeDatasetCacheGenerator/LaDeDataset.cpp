@@ -44,7 +44,7 @@ LaDeDataset::LaDeDataset(std::string path,
     cout << "Number of candidate nodes: " << this->candidate_nodes.size(0) << endl;
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> LaDeDataset::get() {
+mat<string, Tensor> LaDeDataset::get() {
     SegmentGraph graph = this->getGraph();
     Tensor angle = this->rotation ? torch::rand({1}, DEVICE) * 2.0 * M_PI : torch::zeros({1}, DEVICE);
     Tensor scale = torch::rand({1}, DEVICE) * (this->scaling_range * 2.0) - this->scaling_range + 1.0;
@@ -56,13 +56,20 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> LaDeDataset::get() {
 
     Tensor trajs;
     Tensor paths;
-    this->simulateTrajs(graph, trajs, paths);
+    Tensor traj_lengths;
+    Tensor path_lengths;
+    this->simulateTrajs(graph, trajs, paths, traj_lengths, path_lengths);
 
     Tensor graph_tensor = graph.toTensor(this->max_segs_per_graph);
 
     Tensor heatmap = this->getHeatmap(graph_tensor, trajs, 64, 64);
 
-    return std::make_tuple(trajs, paths, graph_tensor, heatmap);
+    return {{"graph", graph_tensor},
+            {"trajs", trajs},
+            {"paths", paths},
+            {"traj_lengths", traj_lengths},
+            {"path_lengths", path_lengths},
+            {"heatmap", heatmap}};
 }
 
 SegmentGraph LaDeDataset::getGraph() {
@@ -113,68 +120,81 @@ SegmentGraph LaDeDataset::getGraph() {
     return SegmentGraph(segments);
 }
 
-void LaDeDataset::simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths) {
+void LaDeDataset::simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths, Tensor &traj_lengths, Tensor &path_lengths) {
 
-    int num_segments = graph.segments.size(0);
-
-    std::vector<Tensor> traj_list;
-    std::vector<Tensor> path_list;
-    int max_path_len = this->graph_depth * 2 + 1;
+    trajs = torch::zeros({this->trajs_per_graph, this->traj_len, 2}, DEVICE);
+    paths = torch::zeros({this->trajs_per_graph, this->max_path_length, 2}, DEVICE);
+    traj_lengths = torch::zeros({trajs_per_graph}, DEVICE);
+    path_lengths = torch::zeros({trajs_per_graph}, DEVICE);
 
     for (int i = 0; i < trajs_per_graph; i++) {
-        int start_segment_id = rand() % num_segments;
-        std::vector<Tensor> path = graph.getRandomPath(start_segment_id);
-        Tensor visiting_nodes = torch::stack(path);     // (N, 2)
-        traj_list.emplace_back(this->simulateTraj(visiting_nodes));
-        auto pad_option = torch::nn::functional::PadFuncOptions({0, 0, 0, max_path_len - visiting_nodes.size(0)});
-        path_list.emplace_back(torch::nn::functional::pad(visiting_nodes, pad_option));
-    }
+        int path_length;
+        graph.getRandomPath(paths[i], path_length);
+        path_lengths[i] = path_length;
 
-    trajs = torch::stack(traj_list, 0);
-    paths = torch::stack(path_list, 0);
+        int traj_len;
+        simulateTraj(paths[i].index({Slice(None, path_length)}), trajs[i], traj_len);
+        traj_lengths[i] = traj_len;
+    }
 }
 
-Tensor LaDeDataset::simulateTraj(Tensor &visiting_nodes) {
+void LaDeDataset::simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_len) {
     // visiting_node: (N, 2)
     // pairwise_dist: (N-1,)
     Tensor exclude_first = visiting_nodes.index({Slice(1, None, 1)});
     Tensor exclude_last = visiting_nodes.index({Slice(None, -1, 1)});
 
     Tensor pairwise_dist = torch::norm(exclude_first - exclude_last, 2, 1);
-    Tensor distances = torch::cumsum(pairwise_dist, 0);
-    distances = torch::cat({torch::zeros({1}, DEVICE), distances}, 0);
+    Tensor total_dist = torch::sum(pairwise_dist);
+//    Tensor distances = torch::cumsum(pairwise_dist, 0);
+//    distances = torch::cat({torch::zeros({1}, DEVICE), distances}, 0);
 
     // Simulate the random walk
-    Tensor walked_dist = torch::zeros(1, DEVICE);
-    Tensor current_pos = visiting_nodes[0];
-    std::vector<Tensor> traj({current_pos});
+//    Tensor walked_dist = torch::zeros(1, DEVICE);
+//    Tensor current_pos = visiting_nodes[0];
+//    std::vector<Tensor> traj({current_pos});
+//
+//    while ((walked_dist < distances[-1]).item<bool>()) {
+//        Tensor next_step_dist = torch::normal(this->traj_step_mean, this->traj_step_std, {1}).to(DEVICE);
+//        // the distance cannot be negative
+//        next_step_dist = torch::nn::functional::relu(next_step_dist);
+//        walked_dist += next_step_dist;
+//        // Find the position of the walker along the path
+//        for (int i = 0; i < distances.size(0) - 1; i++) {
+//            if (((distances[i] <= walked_dist).item<bool>() && (walked_dist < distances[i + 1]).item<bool>())) {
+//                current_pos = visiting_nodes[i] + (walked_dist - distances[i]) / pairwise_dist[i] * (visiting_nodes[i + 1] - visiting_nodes[i]);
+//                break;
+//            }
+//        }
+//        traj.push_back(current_pos);
+//    }
+//
+//    traj.push_back(visiting_nodes[-1]);
+//    Tensor traj_tensor = torch::stack(traj);
 
-    while ((walked_dist < distances[-1]).item<bool>()) {
-        Tensor next_step_dist = torch::normal(this->traj_step_mean, this->traj_step_std, {1}).to(DEVICE);
-        // the distance cannot be negative
-        next_step_dist = torch::nn::functional::relu(next_step_dist);
-        walked_dist += next_step_dist;
-        // Find the position of the walker along the path
-        for (int i = 0; i < distances.size(0) - 1; i++) {
-            if (((distances[i] <= walked_dist).item<bool>() && (walked_dist < distances[i + 1]).item<bool>())) {
-                current_pos = visiting_nodes[i] + (walked_dist - distances[i]) / pairwise_dist[i] * (visiting_nodes[i + 1] - visiting_nodes[i]);
-                break;
-            }
-        }
-        traj.push_back(current_pos);
-    }
 
-    traj.push_back(visiting_nodes[-1]);
-    Tensor traj_tensor = torch::stack(traj);
+    /*
+    Let's change the logic. Originally, we simulate the trajectory by walking along the path.
+    If the total distance of the path id D, each step moves a distance of N(μ, σ^2).
+    Then the number of points to be generated is L = D / N(μ, σ^2).
+    So we can first generate L points uniformly along the path, then add noise to jitter the distances.
+    Finally apply the traj_noise_std to simulate the GPS noise.
+    */
+    traj_len = (int) (total_dist / (this->traj_step_mean + torch::randn({1}, DEVICE) * this->traj_step_std)).item<float>();
+    // t is the percentage of where the point is on the path
+    Tensor t = torch::linspace(0, 1, num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_noise_std;
+    // t must be sorted because noise adding may change the order
+    t = torch::sort(t).values;
+    Tensor traj_tensor = torch::interp(distances, visiting_nodes, t);
 
     Tensor gps_noise = torch::randn(traj_tensor.sizes(), DEVICE) * this->traj_noise_std;
 
     int simulated_traj_len = traj_tensor.size(0);
     if (simulated_traj_len >= this->traj_len) {
-        return (traj_tensor + gps_noise).index({Slice(None, this->traj_len)});
+        traj = (traj_tensor + gps_noise).index({Slice(None, this->traj_len)});
     } else {
         int pad_size = this->traj_len - simulated_traj_len;
-        return torch::nn::functional::pad(traj_tensor + gps_noise, torch::nn::functional::PadFuncOptions({0, 0, 0, pad_size}));
+        traj = torch::nn::functional::pad(traj_tensor + gps_noise, torch::nn::functional::PadFuncOptions({0, 0, 0, pad_size}));
     }
 }
 

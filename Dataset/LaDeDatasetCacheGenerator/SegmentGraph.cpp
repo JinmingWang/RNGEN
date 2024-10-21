@@ -28,10 +28,21 @@ std::vector<int> SegmentGraph::getNeighbors(Tensor node, std::vector<int> &excep
     return neighbors;
 }
 
-std::vector<Tensor> SegmentGraph::getRandomPath(int start_segment_id) {
+void SegmentGraph::getRandomPath(Tensor &path, int &path_length) {
+    int num_segments = graph.segments.size(0);
+    int start_segment_id = rand() % num_segments;
+
     std::vector<int> visited_sid(1, start_segment_id);
-    std::vector<Tensor> path({this->segments[start_segment_id][0], this->segments[start_segment_id][1]});
-    return this->growPath(visited_sid, path);
+    std::vector<Tensor> init_path({this->segments[start_segment_id][0], this->segments[start_segment_id][1]});
+    std::vector<Tensor> result_path = this->growPath(visited_sid, path);
+
+    path_length = result_path.size();
+    path = torch::stack(result_path, 0);    // (path_length, 2)
+    int path_len = this->max_path_length - path_length;
+    if (path_len > 0) {
+        auto pad_option = torch::nn::functional::PadFuncOptions({0, 0, 0, 0, 0, path_len});
+        path = torch::nn::functional::pad(path, pad_option);
+    }
 }
 
 std::vector<Tensor> SegmentGraph::growPath(std::vector<int> &visited_sid, std::vector<Tensor> path) {
@@ -59,7 +70,7 @@ std::vector<Tensor> SegmentGraph::growPath(std::vector<int> &visited_sid, std::v
         }
     }
 
-    if (left_neighbors.size() > 0 || right_neighbors.size() > 0) {
+    if ((left_neighbors.size() > 0 || right_neighbors.size() > 0) && path.size() < this->max_path_length) {
         return this->growPath(visited_sid, path);
     } else {
         return path;

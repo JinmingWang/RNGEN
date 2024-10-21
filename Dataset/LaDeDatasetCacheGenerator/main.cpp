@@ -90,6 +90,8 @@ int main(int argc, char const *argv[]) {
                         scaling_range, traj_step_mean, traj_step_std, traj_noise_std, traj_len);
     vector<Tensor> trajs;
     vector<Tensor> paths;
+    vector<Tensor> trajs_lengths;
+    vector<Tensor> paths_lengths;
     vector<Tensor> graphs;
     vector<Tensor> heatmaps;
 
@@ -97,11 +99,13 @@ int main(int argc, char const *argv[]) {
     clock_t start = clock();
 
     for (int i = 0; i < data_count; i++) {
-        auto [traj, path, graph, heatmap] = dataset.get();
-        trajs.emplace_back(traj.to(torch::kCPU));
-        paths.emplace_back(path.to(torch::kCPU));
-        graphs.emplace_back(graph.to(torch::kCPU));
-        heatmaps.emplace_back(heatmap.to(torch::kCPU));
+        map<string, Tensor> data = dataset.get();
+        trajs.emplace_back(data["trajs"].to(torch::kCPU));
+        paths.emplace_back(data["paths"].to(torch::kCPU));
+        trajs_lengths.emplace_back(data["trajs_lengths"].to(torch::kCPU));
+        paths_lengths.emplace_back(data["paths_lengths"].to(torch::kCPU));
+        graphs.emplace_back(data["graph"].to(torch::kCPU));
+        heatmaps.emplace_back(data["heatmap"].to(torch::kCPU));
 
         double elapsed = double(clock() - start) / CLOCKS_PER_SEC;
         double estimated_total = elapsed / (i + 1) * data_count;
@@ -115,6 +119,8 @@ int main(int argc, char const *argv[]) {
 
     saveTensors(trajs, "./trajs.pth");          // Each element: (64, 128, 2)
     saveTensors(paths, "./paths.pth");          // Each element: (64, 11, 2)
+    saveTensors(trajs_lengths, "./trajs_lengths.pth");  // Each element: (64)
+    saveTensors(paths_lengths, "./paths_lengths.pth");  // Each element: (64)
     saveTensors(graphs, "./graphs.pth");        // Each element: (64, 2, 2)
     saveTensors(heatmaps, "./heatmaps.pth");    // Each element: (2, 64, 64)
     

@@ -13,7 +13,7 @@ public:
                 float traj_noise_std = 0.03,
                 int traj_len = 128);
 
-    std::tuple<Tensor, Tensor, Tensor, Tensor> get();
+    mat<string, Tensor> get();
 
 private:
 
@@ -33,8 +33,8 @@ private:
     Tensor candidate_nodes;
 
     SegmentGraph getGraph();
-    void simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths);
-    Tensor simulateTraj(Tensor &visiting_nodes);
+    void simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths, Tensor &traj_lengths, Tensor &path_lengths);
+    void simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_len);
     Tensor getHeatmap(Tensor graph_tensor, Tensor traj_tensor, int H, int W);
 };
     
