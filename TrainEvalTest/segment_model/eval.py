@@ -1,53 +1,54 @@
-import matplotlib.pyplot as plt
-
-from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.node_edge_model.configs import *
+from Dataset import LaDeCachedDataset
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss, HungarianMode, SegmentsModel, TrajEncoder
-from Diffusion import DDPM
+from Models import HungarianLoss, HungarianMode, SegmentsModel
+from Diffusion import DDIM
 
 import torch
 
-def eval(batch: Dict[str, Tensor], encoder: TrajEncoder, diffusion_net: SegmentsModel, ddpm: DDPM) -> Tuple[plt.Figure, Tensor]:
+def eval(batch: Dict[str, Tensor], models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
     """
     Evaluate the model on the given batch
     :param batch: The batch to evaluate
     :param encoder: The encoder model
     :param diffusion_net: The diffusion network model
-    :param ddpm: The diffusion scheduler
+    :param ddim: The diffusion scheduler
     :return: The figure and loss
     """
-    encoder.eval()
-    diffusion_net.eval()
+    is_training = dict()
+    for name in models:
+        is_training[name] = models[name].training
+        models[name].eval()
 
     with torch.no_grad():
-        traj_enc = encoder(batch["trajs"])
-        noise = torch.randn_like(batch["segs"])
+        traj_enc = models["traj_encoder"](batch["trajs"])
+        noise = torch.randn_like(batch["graph_enc"])
 
-        def pred_func(noisy_contents: List[Tensor], t: Tensor) -> List[Tensor]:
-            noise_pred = diffusion_net(*noisy_contents, traj_enc, t)
+        def pred_func(noisy_contents: List[Tensor], t: Tensor):
+            noise_pred = models["DiT"](*noisy_contents, traj_enc, t)
             return [noise_pred]
+            # return [x0_pred], [torch.randn_like(x0_pred)]
 
-        segs = ddpm.diffusionBackward([noise], pred_func)[0]
+        pred_graph_enc = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
 
-    # Remove padding nodes
-    valid_mask = segs[:, :, -1] >= 0.5
+        pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
 
-    # Get valid nodes and adjacency matrices
-    valid_segs = []
-    for b in range(batch["segs"].shape[0]):
-        valid_segs.append(segs[b, :, :-1][valid_mask[b]])
+    pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
 
-    loss = HungarianLoss(HungarianMode.Seq)(segs, batch["segs"])
+    loss = HungarianLoss(HungarianMode.Seq)(pred_segs, batch["segs"])
+    # loss = torch.nn.functional.mse_loss(pred_segs, batch["segs"])
 
-    plot_manager = PlotManager(5, 2, 2)
+    joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
 
-    # Plot reconstructed graph
-    plot_manager.plotSegments(batch["graphs"][0], 0, 0, "Ground Truth")
-    plot_manager.plotSegments(valid_segs[0].reshape(-1, 2, 2), 0, 1, "Reconstructed")
+    plot_manager = PlotManager(5, 2, 3)
+    plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
+    plot_manager.plotSegments(pred_segs[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
+    plot_manager.plotSegments(pred_segs_jointed, 0, 2, "Pred segs jointed")
     plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
+    plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
+    plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
 
-    encoder.train()
-    diffusion_net.train()
+    for name in models:
+        if is_training[name]:
+            models[name].train()
 
     return plot_manager.getFigure(), loss

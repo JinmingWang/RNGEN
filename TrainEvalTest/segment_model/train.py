@@ -12,8 +12,42 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, TrajEncoder, HungarianLoss, HungarianMode
-from Diffusion import DDPM
+from Models import SegmentsModel, PathEncoder, GraphEncoder, GraphDecoder, HungarianLoss, HungarianMode
+from Diffusion import DDIM
+
+
+def prepareModels() -> Dict[str, torch.nn.Module]:
+    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, 128).to(DEVICE)
+    graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
+    graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
+    DiT = SegmentsModel(d_in=16, d_traj_enc=128, n_layers=12, T=T, pred_x0=True).to(DEVICE)
+
+    # Model-S:
+    # traj_encoder: d_encode = 128
+    # DiT: d_in = 16, d_traj_enc = 128, n_layers = 12
+
+    # Model-M:
+    # traj_encoder: d_encode = 192
+    # DiT: d_in = 16, d_traj_enc = 192, n_layers = 14
+
+    # Model-L:
+    # traj_encoder: d_encode = 256
+    # DiT: d_in = 16, d_traj_enc = 256, n_layers = 16
+
+    # Load pre-trained graph VAE, it will be always frozen
+    loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
+    graph_encoder.eval()
+    graph_decoder.eval()
+
+    traj_encoder.eval()
+
+    torch.set_float32_matmul_precision('high')
+    traj_encoder = torch.compile(traj_encoder)
+    graph_encoder = torch.compile(graph_encoder)
+    graph_decoder = torch.compile(graph_decoder)
+    DiT = torch.compile(DiT)
+
+    return {"traj_encoder": traj_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
 
 def train():
@@ -22,20 +56,20 @@ def train():
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
     # Models
-    encoder = TrajEncoder(N_TRAJS, L_TRAJ, D_TRAJ_ENC).to(DEVICE)
-    diffusion_net = SegmentsModel(n_seg=N_SEGS, d_in=5, d_traj_enc=D_TRAJ_ENC, n_traj=N_TRAJS, T=T).to(DEVICE)
-    torch.set_float32_matmul_precision('high')
-    encoder = torch.compile(encoder)
-    diffusion_net = torch.compile(diffusion_net)
-    # encoder, diffusion_net = loadModels("Runs/NodeEdgeModel_2024-10-07_04-50-30/last.pth", encoder, diffusion_net)
-    ddpm = DDPM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic")
+    models = prepareModels()
+
+    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1)
+    loss_func = HungarianLoss(HungarianMode.Seq)
     # loss_func = torch.nn.MSELoss()
-    loss_func = HungarianLoss(HungarianMode.Seq, 'l1')
 
     # Optimizer & Scheduler
-    optimizer = AdamW([{"params": diffusion_net.parameters(), "lr": LR_DIFFUSION},
-                       {"params": encoder.parameters(), "lr": LR_ENCODER}], lr=LR_DIFFUSION)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE, min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
+    optimizer = AdamW([
+        {"params": models["DiT"].parameters(), "lr": LR},
+        {"params": models["traj_encoder"].parameters(), "lr":LR * 0.1}
+        ],
+        lr=LR)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
+                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
     # Prepare Logging
     os.makedirs(LOG_DIR)
@@ -50,36 +84,34 @@ def train():
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
 
-                # count number of non-zero tokens for each batch graph
-                segments = batch["graphs"].flatten(2)   # (B, G, 2, 2) -> (B, G, 4)
-                valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
-                # add a dimension for segments indicating if it's a valid segment or padding
-                segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = segments
+                with torch.no_grad():
+                    batch["graph_enc"], _ = models["graph_encoder"](batch["segs"])
 
-                noise = torch.randn_like(batch["segs"])
+                noise = torch.randn_like(batch["graph_enc"])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
-                noisy_segs = ddpm.diffusionForward(batch["segs"], t, noise)
+                noisy_x = ddim.diffusionForward(batch["graph_enc"], t, noise)
 
                 s = t - 1
-                less_noisy_segs = torch.zeros_like(noisy_segs)
-                less_noisy_segs[t!=0] = ddpm.diffusionForward(batch["segs"][t!=0], s[t!=0], noise[t!=0])
-                less_noisy_segs[t==0] = batch["segs"][t==0]
+                less_noisy_x = torch.zeros_like(noisy_x)
+                less_noisy_x[t!=0] = ddim.diffusionForward(batch["graph_enc"][t!=0], s[t!=0], noise[t!=0])
+                less_noisy_x[t==0] = batch["graph_enc"][t==0]
 
                 optimizer.zero_grad()
-                traj_enc = encoder(batch["trajs"])
-                pred_noise = diffusion_net(noisy_segs, traj_enc, t)
 
-                pred_segs = ddpm.diffusionBackwardStep(noisy_segs, t, pred_noise, disable_noise=True)
+                traj_enc = models["traj_encoder"](batch["trajs"])
+                pred = models["DiT"](noisy_x, traj_enc, t)
 
-                loss = loss_func(pred_segs, less_noisy_segs)
+                pred_less_noisy_x = ddim.diffusionBackwardStepWithx0(batch["graph_enc"], t, s, pred)
+
+                # loss = loss_func(pred, batch["graph_enc"])
+                loss = loss_func(pred_less_noisy_x, less_noisy_x)
 
                 loss.backward()
 
                 # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(encoder.parameters(), 1.0)
-                torch.nn.utils.clip_grad_norm_(diffusion_net.parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.0)
+                torch.nn.utils.clip_grad_norm_(models["traj_encoder"].parameters(), 1.0)
 
                 optimizer.step()
 
@@ -93,15 +125,15 @@ def train():
                     writer.add_scalar("loss/Loss", mov_avg_loss.get(), global_step)
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
-                if global_step % EVAL_INTERVAL == 0:
-                    figure, eval_loss = eval(batch, encoder, diffusion_net, ddpm)
-                    writer.add_figure("Evaluation", figure, global_step)
-                    writer.add_scalar("loss/eval", eval_loss.item(), global_step)
+            if e % EVAL_INTERVAL == 0:
+                figure, eval_loss = eval(batch, models, ddim)
+                writer.add_figure("Evaluation", figure, global_step)
+                writer.add_scalar("loss/eval", eval_loss.item(), global_step)
 
-            saveModels(LOG_DIR + "last.pth", encoder, diffusion_net)
+            saveModels(LOG_DIR + "last.pth", models["DiT"], models["traj_encoder"])
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(LOG_DIR + "best.pth", encoder, diffusion_net)
+                saveModels(LOG_DIR + "best.pth", models["DiT"], models["traj_encoder"])
 
             lr_scheduler.step(total_loss)
 
