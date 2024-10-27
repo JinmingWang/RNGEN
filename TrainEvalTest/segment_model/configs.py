@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "20K_HLoss_Res"
+COMMENT = "Path_As_Condition"
 
 PATH_ENCODER_WEIGHT = ""
 # GRAPH_VAE_WEIGHT = "Runs/GraphVAE/20241017_043956_SegsJoints/last.pth"

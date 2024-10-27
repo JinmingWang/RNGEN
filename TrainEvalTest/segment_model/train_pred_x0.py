@@ -17,7 +17,7 @@ from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
-    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, 128).to(DEVICE)
+    traj_encoder = PathEncoder(N_TRAJS, L_PATH, 9, 128).to(DEVICE)
     graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
     graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
     DiT = SegmentsModel(d_in=16, d_traj_enc=128, n_layers=12, T=T, pred_x0=True).to(DEVICE)
@@ -99,7 +99,7 @@ def train():
 
                 optimizer.zero_grad()
 
-                traj_enc = models["traj_encoder"](batch["trajs"])
+                traj_enc = models["traj_encoder"](batch["paths"])
                 pred = models["DiT"](noisy_x, traj_enc, t)
 
                 pred_less_noisy_x = ddim.diffusionBackwardStepWithx0(batch["graph_enc"], t, s, pred)
