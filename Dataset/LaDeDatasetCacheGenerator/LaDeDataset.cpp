@@ -26,9 +26,9 @@ LaDeDataset::LaDeDataset(std::string path,
     torch::IValue x = torch::pickle_load(getBytes(path));
     auto generic_list = x.toList();
 
-    this->nodes = generic_list.get(1).toTensor().to(DEVICE);
-    this->edges = generic_list.get(2).toTensor().to(DEVICE);
-    this->degrees = generic_list.get(3).toTensor().to(DEVICE);
+    this->nodes = generic_list.get(0).toTensor().to(DEVICE);
+    this->edges = generic_list.get(1).toTensor().to(DEVICE);
+    this->degrees = generic_list.get(2).toTensor().to(DEVICE);
 
     removeBadNodes();
 
@@ -49,58 +49,78 @@ LaDeDataset::LaDeDataset(std::string path,
 
 void LaDeDataset::removeBadNodes() {
     // bad node definition: For node B, if it has only two neighbors A and C
-    // and the angle between BA and BC is less than 30 degrees
-    // this means ABC is almost a straight line, B is meaningless
+    // and the segment ABC is almost a straight line, then B is meaningless
     // In this case, remove node B from nodes, degrees and edges
     // Remove neighbor B from edges of A and C
     // If A and C are already connected, reduce their degree by 1
     // If A and C are not connected, connect them
+    cout << "Removing Bad points" << endl;
+    int points_removed = 0;
+    // Iterate over all nodes in form A-B-C, node B has degree 2
+    for (int B_id = 0; B_id < this->nodes.size(0); B_id++) {
+        if (this->degrees[B_id].item<int>() == 2) {
+            // Get the id of node A and C
+            int A_id = this->edges[B_id][0].item<int>();
+            int C_id = this->edges[B_id][1].item<int>();
 
-    for (int i = 0; i < this->nodes.size(0); i++) {
-        if (this->degrees[i].item<int>() == 2) {
-            int neighbor_1 = this->edges[i][0].item<int>();
-            int neighbor_2 = this->edges[i][1].item<int>();
-            Tensor node = this->nodes[i];
-            Tensor neighbor_1_node = this->nodes[neighbor_1];
-            Tensor neighbor_2_node = this->nodes[neighbor_2];
-            Tensor vec_1 = node - neighbor_1_node;
-            Tensor vec_2 = node - neighbor_2_node;
-            float cos_theta = torch::dot(vec_1, vec_2) / (torch::norm(vec_1) * torch::norm(vec_2)).item<float>();
-            Tensor degrees = torch::acos(cos_theta) * 180.0 / M_PI;
-            if (degrees < 30) {
-                // It is not wise to remove elements from a tensor, since it involves index shifting
-                // We can instead just remove edge AB and BC, then set the degree of B to 0
-                // This will make B an isolated node, which will never be involved in all later operations
-                this->edges[i] = torch::zeros_like(this->edges[i]);     // remove all edges of B
-                this->degrees[i] = 0;
+            // Get node A, B, C
+            Tensor node_A = this->nodes[A_id];
+            Tensor node_B = this->nodes[B_id];
+            Tensor node_C = this->nodes[C_id];
+
+            // Calculate the angle between BA and BC
+            Tensor vec_1 = node_B - node_A;
+            Tensor vec_2 = node_B - node_C;
+            Tensor cos_theta = torch::dot(vec_1, vec_2) / (torch::norm(vec_1) * torch::norm(vec_2));
+            cos_theta = torch::clamp(cos_theta, -1.0, 1.0);
+            float degrees = torch::acos(cos_theta).item<float>() * 180.0 / M_PI;
+
+            // Check if ABC is almost a straight line
+            // Then the angle will be close to 180
+            if (degrees > 170) {
+                points_removed ++;
+                // Not good to remove elements, as it involves reassigning the index
+                // Remove all edges related to B by setting all edges to -1, set degree of B to 0
+                this->edges[B_id].fill_(-1);
+                this->degrees[B_id] = 0;
+
                 // Remove B from the neighbors of A
-                int B_pos = torch::where(this->edges[neighbor_1] == i)[0].item<int>();
-                int last_pos = this->degrees[neighbor_1].item<int>() - 1;
+                // [... , B , ... , last , ...] -> [... , last , ... , -1 , ...]
+                auto B_pos = torch::where(this->edges[A_id] == B_id)[0].item<int>();
+                int last_pos = this->degrees[A_id].item<int>() - 1;
+                this->edges.index({A_id, B_pos}) = this->edges.index({A_id, last_pos});
+                this->edges.index({A_id, last_pos}) = -1;
+                this->degrees[A_id] -= 1;
+
                 // Move the last element to the position of B, then set the last element to 0
-                this->edges.index({neighbor_1, B_pos}) = this->edges.index({neighbor_1, last_pos});
-                this->edges.index({neighbor_1, last_pos}) = 0;
+                B_pos = torch::where(this->edges[C_id] == B_id)[0].item<int>();
+                last_pos = this->degrees[C_id].item<int>() - 1;
+                this->edges.index({C_id, B_pos}) = this->edges.index({C_id, last_pos});
+                this->edges.index({C_id, last_pos}) = -1;
+                this->degrees[C_id] -= 1;
 
-                B_pos = torch::where(this->edges[neighbor_2] == i)[0].item<int>();
-                last_pos = this->degrees[neighbor_2].item<int>() - 1;
-                this->edges.index({neighbor_2, B_pos}) = this->edges.index({neighbor_2, last_pos});
-                this->edges.index({neighbor_2, last_pos}) = 0;
-
-                if (torch::where(this->edges[neighbor_1] == neighbor_2).size(0) == 0) {
-                    // Connect A and C if they are not connected
-                    // Degree does not change because B is removed
-                    this->edges[neighbor_1][this->degrees[neighbor_1]] = neighbor_2;
-                    this->edges[neighbor_2][this->degrees[neighbor_2]] = neighbor_1;
-                } else {
-                    this->degrees[neighbor_1] -= 1;
-                    this->degrees[neighbor_2] -= 1;
+                // Because A and C are originally connected by B, after removing AB and BC, there shoud be AC
+                // If A and C are not connected, then connect them
+                if (torch::sum(this->edges[A_id] == C_id).item<int>() == 0) {
+                    this->edges[A_id][this->degrees[A_id]] = C_id;
+                    this->edges[C_id][this->degrees[C_id]] = A_id;
+                    this->degrees[A_id] += 1;
+                    this->degrees[C_id] += 1;
                 }
             }
         }
     }
+    // If we have eliminated some bad points, say we removed B in ABCD
+    // Now we have ACD, but C in ACD can be a new bad point
+    // However, ACD is not checked in the first round
+    if (points_removed > 0) {
+        cout << points_removed << " points removed, continue" << endl;
+        removeBadNodes();
+    }
 }
 
 
-mat<string, Tensor> LaDeDataset::get() {
+map<string, Tensor> LaDeDataset::get() {
     SegmentGraph graph = this->getGraph();
     Tensor angle = this->rotation ? torch::rand({1}, DEVICE) * 2.0 * M_PI : torch::zeros({1}, DEVICE);
     Tensor scale = torch::rand({1}, DEVICE) * (this->scaling_range * 2.0) - this->scaling_range + 1.0;
@@ -116,6 +136,7 @@ mat<string, Tensor> LaDeDataset::get() {
     Tensor path_lengths;
     this->simulateTrajs(graph, trajs, paths, traj_lengths, path_lengths);
 
+    Tensor num_segments = torch::ones({1}) * graph.segments.size(0);
     Tensor graph_tensor = graph.toTensor(this->max_segs_per_graph);
 
     Tensor heatmap = this->getHeatmap(graph_tensor, trajs, 64, 64);
@@ -125,6 +146,7 @@ mat<string, Tensor> LaDeDataset::get() {
             {"paths", paths},
             {"traj_lengths", traj_lengths},
             {"path_lengths", path_lengths},
+            {"num_segments", num_segments},
             {"heatmap", heatmap}};
 }
 
@@ -178,23 +200,27 @@ SegmentGraph LaDeDataset::getGraph() {
 
 void LaDeDataset::simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths, Tensor &traj_lengths, Tensor &path_lengths) {
 
-    trajs = torch::zeros({this->trajs_per_graph, this->traj_len, 2}, DEVICE);
-    paths = torch::zeros({this->trajs_per_graph, this->max_path_length, 2}, DEVICE);
-    traj_lengths = torch::zeros({trajs_per_graph}, DEVICE);
-    path_lengths = torch::zeros({trajs_per_graph}, DEVICE);
+    trajs = torch::zeros({this->trajs_per_graph, this->traj_len, 2}).to(DEVICE);
+    paths = torch::zeros({this->trajs_per_graph, graph.max_path_length, 2}).to(DEVICE);
+    traj_lengths = torch::ones({trajs_per_graph}).to(DEVICE).to(torch::kLong);
+    path_lengths = torch::ones({trajs_per_graph}).to(DEVICE).to(torch::kLong);
 
     for (int i = 0; i < trajs_per_graph; i++) {
         int path_length;
-        graph.getRandomPath(paths[i], path_length);
-        path_lengths[i] = path_length;
+        Tensor path;
+        graph.getRandomPath(path, path_length);
+        paths[i] = path;
+        path_lengths[i] *= path_length;
 
-        int traj_len;
-        simulateTraj(paths[i].index({Slice(None, path_length)}), trajs[i], traj_len);
-        traj_lengths[i] = traj_len;
+        Tensor traj;
+        int num_points;
+        simulateTraj(paths[i].index({Slice(None, path_length)}), traj, num_points);
+        trajs[i] = traj;
+        traj_lengths[i] *= num_points;
     }
 }
 
-void LaDeDataset::simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_len) {
+void LaDeDataset::simulateTraj(Tensor visiting_nodes, Tensor &traj, int &num_points) {
     // visiting_node: (N, 2)
     // pairwise_dist: (N-1,)
     Tensor exclude_first = visiting_nodes.index({Slice(1, None, 1)});
@@ -231,16 +257,19 @@ void LaDeDataset::simulateTraj(Tensor &visiting_nodes, Tensor &traj, int &traj_l
     /*
     Let's change the logic. Originally, we simulate the trajectory by walking along the path.
     If the total distance of the path id D, each step moves a distance of N(μ, σ^2).
-    Then the number of points to be generated is L = D / N(μ, σ^2).
+    Then the number of points to be generated is L = D / μ.
     So we can first generate L points uniformly along the path, then add noise to jitter the distances.
     Finally apply the traj_noise_std to simulate the GPS noise.
     */
-    traj_len = (int) (distances[-1] / (this->traj_step_mean + torch::randn({1}, DEVICE) * this->traj_step_std)).item<float>();
-    // t is the percentage of where the point is on the path
-    Tensor t = torch::linspace(0, 1, num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_noise_std;
+    num_points = (int) (distances[-1] / this->traj_step_mean + torch::randn({1}, DEVICE)).item<float>();
+    if (num_points < 3) num_points = 3;
+    if (num_points > this->traj_len) num_points = this->traj_len;
+    // t is where the point is on the path
+    Tensor t = torch::linspace(0, distances[-1].item<float>(), num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_step_std;
+    t = torch::nn::functional::hardtanh(t, torch::nn::HardtanhOptions().min_val(0.01).max_val(distances[-1].item<float>() - 0.01));
     // t must be sorted because noise adding may change the order
-    t = std::get<0>(torch::sort(t))
-    Tensor traj_tensor = torch::zeros({num_points, 2}, DEVICE);
+    t = std::get<0>(torch::sort(t));
+    Tensor traj_tensor = torch::ones({num_points, 2}).to(DEVICE);
 
     // Iter all points
     for (int i = 0; i < num_points; i++) {

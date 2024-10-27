@@ -331,11 +331,11 @@ class Res1D(nn.Module):
 
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
-class Conv2dInAct(nn.Sequential):
+class Conv2dBnAct(nn.Sequential):
     def __init__(self, d_in: int, d_out: int, k: int, s: 1, p: 0):
         super().__init__(
             nn.Conv2d(d_in, d_out, k, s, p),
-            nn.InstanceNorm2d(d_out),
+            nn.BatchNorm2d(d_out),
             Swish()
         )
 

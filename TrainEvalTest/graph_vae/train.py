@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import GraphEncoder, GraphDecoder, KLLoss, HungarianLoss, HungarianMode
+from Models import GraphEncoder, GraphDecoder, KLLoss
 
 
 def train():
@@ -25,9 +25,7 @@ def train():
     decoder = GraphDecoder(d_latent=D_LATENT, d_head=D_HEAD, d_expand=D_EXPAND,
                            d_hidden=D_HIDDEN, n_heads=N_HEADS, n_layers=4, dropout=0.0).to(DEVICE)
 
-    # torch.set_float32_matmul_precision('high')
-    # encoder = torch.compile(encoder)
-    # decoder = torch.compile(decoder)
+    loadModels("Runs/GraphVAE/20241025_142500_SegsJoints/best.pth", encoder, decoder)
 
     kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
     segs_loss_func = torch.nn.MSELoss()
@@ -42,9 +40,9 @@ def train():
     # Prepare Logging
     os.makedirs(LOG_DIR, exist_ok=True)
     writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_kld = MovingAvg(MOV_AVG_LEN)
-    mov_avg_joints = MovingAvg(MOV_AVG_LEN)
-    mov_avg_segs = MovingAvg(MOV_AVG_LEN)
+    mov_avg_kld = MovingAvg(MOV_AVG_LEN * len(dataloader))
+    mov_avg_joints = MovingAvg(MOV_AVG_LEN * len(dataloader))
+    mov_avg_segs = MovingAvg(MOV_AVG_LEN * len(dataloader))
     global_step = 0
     best_loss = float("inf")
     plot_manager = PlotManager(5, 2, 2)
@@ -54,21 +52,6 @@ def train():
             total_loss = 0
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, torch.Tensor]
-
-                batch |= LaDeCachedDataset.SegmentsToNodesAdj(batch["graphs"], N_NODES)
-
-                # count number of non-zero tokens for each batch graph
-                segments = batch["graphs"].flatten(2)  # (B, G, 2, 2) -> (B, G, 4)
-                valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
-                # add a dimension for segments indicating if it's a valid segment or padding
-                segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                # randomly permute the segments along the graph dimension
-                perm = torch.randperm(segments.shape[1])
-                batch["segs"] = segments[:, perm, :]
-
-                # randomly permute the segments along the graph dimension
-                perm = torch.randperm(batch["segs"].shape[1])
-                batch["segs"] = batch["segs"][:, perm, :]
 
                 batch |= LaDeCachedDataset.getJointsFromSegments(batch["segs"])
 
@@ -104,7 +87,7 @@ def train():
                                 lr=optimizer.param_groups[0]['lr'])
 
                 # Logging
-                if global_step % 5 == 0:
+                if e % LOG_INTERVAL == 0:
                     writer.add_scalar("loss/KLD", mov_avg_kld.get(), global_step)
                     writer.add_scalar("loss/Joints", mov_avg_joints.get(), global_step)
                     writer.add_scalar("loss/Segs", mov_avg_segs.get(), global_step)

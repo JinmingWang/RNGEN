@@ -15,7 +15,7 @@
  */
 
 int data_count = 10;
-std::string path = "processed.pt";
+std::string path = "/home/jimmy/Data/LaDe/processed_roads_Shanghai.pt";
 int graph_depth = 5;
 int trajs_per_graph = 64;
 int max_segs_per_graph = 64;
@@ -93,6 +93,7 @@ int main(int argc, char const *argv[]) {
     vector<Tensor> trajs_lengths;
     vector<Tensor> paths_lengths;
     vector<Tensor> graphs;
+    vector<Tensor> graphs_segs;
     vector<Tensor> heatmaps;
 
     // record start time
@@ -102,8 +103,9 @@ int main(int argc, char const *argv[]) {
         map<string, Tensor> data = dataset.get();
         trajs.emplace_back(data["trajs"].to(torch::kCPU));
         paths.emplace_back(data["paths"].to(torch::kCPU));
-        trajs_lengths.emplace_back(data["trajs_lengths"].to(torch::kCPU));
-        paths_lengths.emplace_back(data["paths_lengths"].to(torch::kCPU));
+        trajs_lengths.emplace_back(data["traj_lengths"].to(torch::kCPU));
+        paths_lengths.emplace_back(data["path_lengths"].to(torch::kCPU));
+        graphs_segs.emplace_back(data["num_segments"].to(torch::kCPU));
         graphs.emplace_back(data["graph"].to(torch::kCPU));
         heatmaps.emplace_back(data["heatmap"].to(torch::kCPU));
 
@@ -117,12 +119,13 @@ int main(int argc, char const *argv[]) {
     }
     std::cout << std::endl;
 
-    saveTensors(trajs, "./trajs.pth");          // Each element: (64, 128, 2)
-    saveTensors(paths, "./paths.pth");          // Each element: (64, 11, 2)
-    saveTensors(trajs_lengths, "./trajs_lengths.pth");  // Each element: (64)
-    saveTensors(paths_lengths, "./paths_lengths.pth");  // Each element: (64)
-    saveTensors(graphs, "./graphs.pth");        // Each element: (64, 2, 2)
-    saveTensors(heatmaps, "./heatmaps.pth");    // Each element: (2, 64, 64)
+    saveTensors(trajs, "./CACHE/trajs.pth");          // Each element: (64, 128, 2)
+    saveTensors(paths, "./CACHE/paths.pth");          // Each element: (64, 11, 2)
+    saveTensors(trajs_lengths, "./CACHE/trajs_lengths.pth");  // Each element: (64)
+    saveTensors(paths_lengths, "./CACHE/paths_lengths.pth");  // Each element: (64)
+    saveTensors(graphs_segs, "./CACHE/segs_count.pth");  // Each element: (64)
+    saveTensors(graphs, "./CACHE/graphs.pth");        // Each element: (64, 2, 2)
+    saveTensors(heatmaps, "./CACHE/heatmaps.pth");    // Each element: (2, 64, 64)
     
     return 0;
 }

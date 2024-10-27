@@ -1,6 +1,6 @@
 from Dataset import LaDeCachedDataset
 from TrainEvalTest.Utils import *
-from Models import HungarianLoss, HungarianMode, SegmentsModel, TrajEncoder
+from Models import HungarianLoss, HungarianMode, SegmentsModel
 from Diffusion import DDIM
 
 import torch
@@ -23,11 +23,12 @@ def eval(batch: Dict[str, Tensor], models: Dict[str, torch.nn.Module], ddim: DDI
         traj_enc = models["traj_encoder"](batch["trajs"])
         noise = torch.randn_like(batch["graph_enc"])
 
-        def pred_func(noisy_contents: List[Tensor], t: Tensor) -> Tuple[List[Tensor], List[Tensor]]:
-            x0_pred = models["DiT"](*noisy_contents, traj_enc, t)
-            return [x0_pred], [torch.randn_like(x0_pred)]
+        def pred_func(noisy_contents: List[Tensor], t: Tensor):
+            noise_pred = models["DiT"](*noisy_contents, traj_enc, t)
+            return [noise_pred]
+            # return [x0_pred], [torch.randn_like(x0_pred)]
 
-        pred_graph_enc = ddim.diffusionBackward([noise], pred_func)[0]
+        pred_graph_enc = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
 
         pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
 

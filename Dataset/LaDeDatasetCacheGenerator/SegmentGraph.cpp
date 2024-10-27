@@ -29,18 +29,18 @@ std::vector<int> SegmentGraph::getNeighbors(Tensor node, std::vector<int> &excep
 }
 
 void SegmentGraph::getRandomPath(Tensor &path, int &path_length) {
-    int num_segments = graph.segments.size(0);
+    int num_segments = this->segments.size(0);
     int start_segment_id = rand() % num_segments;
 
     std::vector<int> visited_sid(1, start_segment_id);
     std::vector<Tensor> init_path({this->segments[start_segment_id][0], this->segments[start_segment_id][1]});
-    std::vector<Tensor> result_path = this->growPath(visited_sid, path);
+    std::vector<Tensor> result_path = this->growPath(visited_sid, init_path);
 
     path_length = result_path.size();
     path = torch::stack(result_path, 0);    // (path_length, 2)
     int path_len = this->max_path_length - path_length;
     if (path_len > 0) {
-        auto pad_option = torch::nn::functional::PadFuncOptions({0, 0, 0, 0, 0, path_len});
+        auto pad_option = torch::nn::functional::PadFuncOptions({0, 0, 0, path_len});
         path = torch::nn::functional::pad(path, pad_option);
     }
 }

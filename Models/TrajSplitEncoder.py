@@ -1,33 +1,75 @@
 from .Basics import *
 
 # This encoder splits the trajectories into sub-trajectories
+class Stage(nn.Sequential):
+    def __init__(self, N_trajs: int, L_traj: int, L_segment: int, D_token: int, D_out: int, downsample: bool = False):
+        self.N_trajs = N_trajs
+        self.L_traj = L_traj
+        self.L_segment = L_segment
+        self.D_token = D_token
+        self.D_out = D_out
+        super().__init__(
+            Rearrange("(B N) C L", "B N (L C)", N=N_trajs),
+            # The design: the idea is that each head will focus on a segment of the trajectory
+            AttentionBlock(d_in=L_traj * D_token, d_out=L_traj * D_token, d_head=L_segment * D_token,
+                           n_heads=L_traj // L_segment, d_expand=256),
+            AttentionBlock(d_in=L_traj * D_token, d_out=L_traj * D_token, d_head=L_segment * D_token,
+                           n_heads=L_traj // L_segment, d_expand=256),
 
-class TrajEncoder(nn.Module):
-    def __init__(self, N_trajs: int, L_traj: int, D_encode: int):
-        super().__init__()
+            Rearrange("B N (L C)", "(B N) C L", L=L_traj),
+            Res1D(D_token, 128, D_token),
+            Res1D(D_token, 128, D_out),
 
-        self.D_token = L_traj * 2
-        self.D_subtoken = D_encode
-
-        # input: (B, N, L, C=2)
-        self.layers = nn.Sequential(
-            Rearrange("B N L C", "(B N) C L"),
-            nn.Conv1d(2, 32, 3, 1, 1),
-            Swish(),
-
-            Res1D(32, 128, 32),
-            Res1D(32, 128, 32),
-            nn.Conv1d(32, 64, 3, 2, 1),     # (BN, 64, 32)
-            Swish(),
-
-            Res1D(64, 256, 64),
-            Res1D(64, 256, 64),
-            nn.Conv1d(64, 128, 3, 2, 1),  # (BN, 128, 16)
-
-            Rearrange("(B N) C L", "B (N L) C", N=N_trajs),
-            *[AttentionBlock(d_in=128, d_out=128, d_head=128, n_heads=8, d_expand=512) for _ in range(6)],
-            nn.Linear(128, D_encode),
+            nn.Conv1d(D_out, D_out, 3, 1 + int(downsample), 1),
         )
 
+
+class TrajSplitEncoder(nn.Module):
+    def __init__(self, N_trajs: int, L_traj: int, L_path: int, d_encode: int):
+        super().__init__()
+
+        self.N_trajs = N_trajs
+        self.L_traj = L_traj
+        self.L_path = L_path
+        self.d_encode = d_encode
+
+        # input: (B, N, L, C=2)
+        self.resnet = nn.Sequential(
+            Rearrange("B N L C", "(B N) C L"),
+            Conv1dBnAct(2, 16, 3, 1, 1),
+            Conv1dBnAct(16, 64, 3, 1, 1),
+            Res1D(64, 128, 64),
+            Res1D(64, 128, 64),
+            Res1D(64, 128, 64),
+            Conv1dBnAct(64, 128, 3, 1, 1),
+            nn.MaxPool1d(2),
+            Res1D(128, 256, 128),
+            Res1D(128, 256, 128),
+            Res1D(128, 256, 128),
+            Conv1dBnAct(128, 256, 3, 1, 1),
+            nn.MaxPool1d(2),
+            nn.Conv1d(256, 256, 3, 1, 1),
+            # (BN, C=8, L=32)
+        )
+
+        # (BN, C=8, L=64)
+
+        self.attentions = nn.Sequential(
+            Rearrange("(B N) C L", "B (N L) C", N=N_trajs),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+
+        )
+
+        self.head = nn.Linear(256, d_encode)
+
     def forward(self, x):
-        return self.layers(x)
+        x = self.resnet(x)
+        x = self.attentions(x)
+        return self.head(x)

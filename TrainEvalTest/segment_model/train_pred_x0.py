@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import SegmentsModel, TrajEncoder, PathEncoder, HungarianLoss, HungarianMode, GraphEncoder, GraphDecoder
+from Models import SegmentsModel, PathEncoder, GraphEncoder, GraphDecoder, HungarianLoss, HungarianMode
 from Diffusion import DDIM
 
 
@@ -41,11 +41,11 @@ def prepareModels() -> Dict[str, torch.nn.Module]:
 
     traj_encoder.eval()
 
-    # torch.set_float32_matmul_precision('high')
-    # traj_encoder = torch.compile(traj_encoder)
-    # graph_encoder = torch.compile(graph_encoder)
-    # graph_decoder = torch.compile(graph_decoder)
-    # DiT = torch.compile(DiT)
+    torch.set_float32_matmul_precision('high')
+    traj_encoder = torch.compile(traj_encoder)
+    graph_encoder = torch.compile(graph_encoder)
+    graph_decoder = torch.compile(graph_decoder)
+    DiT = torch.compile(DiT)
 
     return {"traj_encoder": traj_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
@@ -65,7 +65,7 @@ def train():
     # Optimizer & Scheduler
     optimizer = AdamW([
         {"params": models["DiT"].parameters(), "lr": LR},
-        {"params": models["traj_encoder"].parameters(), "lr":LR}
+        {"params": models["traj_encoder"].parameters(), "lr":LR * 0.1}
         ],
         lr=LR)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
@@ -84,34 +84,28 @@ def train():
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
 
-                # count number of non-zero tokens for each batch graph
-                segments = batch["graphs"].flatten(2)   # (B, G, 2, 2) -> (B, G, 4)
-                valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0 # (B, G)
-                # add a dimension for segments indicating if it's a valid segment or padding
-                segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
-                batch["segs"] = segments
-
                 with torch.no_grad():
-                    batch["graph_enc"], _ = models["graph_encoder"](segments)
+                    batch["graph_enc"], _ = models["graph_encoder"](batch["segs"])
 
                 noise = torch.randn_like(batch["graph_enc"])
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
-                noisy_graph_enc = ddim.diffusionForward(batch["graph_enc"], t, noise)
+                noisy_x = ddim.diffusionForward(batch["graph_enc"], t, noise)
 
-                # s = t - 1
-                # less_noisy_segs = torch.zeros_like(noisy_segs)
-                # less_noisy_segs[t!=0] = ddim.diffusionForward(batch["segs"][t!=0], s[t!=0], noise[t!=0])
-                # less_noisy_segs[t==0] = batch["segs"][t==0]
+                s = t - 1
+                less_noisy_x = torch.zeros_like(noisy_x)
+                less_noisy_x[t!=0] = ddim.diffusionForward(batch["graph_enc"][t!=0], s[t!=0], noise[t!=0])
+                less_noisy_x[t==0] = batch["graph_enc"][t==0]
 
                 optimizer.zero_grad()
 
                 traj_enc = models["traj_encoder"](batch["trajs"])
-                pred_graph_enc = models["DiT"](noisy_graph_enc, traj_enc, t)
+                pred = models["DiT"](noisy_x, traj_enc, t)
 
-                # pred_less_noisy_segs = ddim.diffusionBackwardStepWithx0(pred_segs, t, s, pred_noise)
+                pred_less_noisy_x = ddim.diffusionBackwardStepWithx0(batch["graph_enc"], t, s, pred)
 
-                loss = loss_func(pred_graph_enc, batch["graph_enc"])
+                # loss = loss_func(pred, batch["graph_enc"])
+                loss = loss_func(pred_less_noisy_x, less_noisy_x)
 
                 loss.backward()
 

@@ -9,7 +9,8 @@ class LaDeCachedDataset(Dataset):
     def __init__(self,
                  folder_path: str,
                  max_trajs: int = 32,
-                 set_name: str = "train") -> None:
+                 set_name: str = "train",
+                 no_padding: bool = False) -> None:
         """
         Initialize the dataset, this class loads data from a cache file
         The cache file is created by using LaDeDatasetCacheGenerator class
@@ -20,6 +21,7 @@ class LaDeCachedDataset(Dataset):
         self.max_trajs = max_trajs
         self.set_name = set_name
         self.enable_augmentation = set_name == "train"
+        self.no_padding = no_padding
 
         self.trajs = torch.load(folder_path + "/trajs.pth")
         data_count = len(self.trajs)
@@ -29,7 +31,19 @@ class LaDeCachedDataset(Dataset):
         self.paths = torch.load(folder_path + "/paths.pth")[slicing]
         self.graph_tensor = torch.load(folder_path + "/graphs.pth")[slicing]
         self.heatmap = torch.load(folder_path + "/heatmaps.pth")[slicing]
+        self.paths_lengths = torch.load(folder_path + "/paths_lengths.pth")[slicing]
+        self.trajs_lengths = torch.load(folder_path + "/trajs_lengths.pth")[slicing]
+        self.segs_count = torch.load(folder_path + "/segs_count.pth")[slicing]
 
+        path_lens = torch.cat(self.paths_lengths).to(torch.float32)
+        traj_lens = torch.cat(self.trajs_lengths).to(torch.float32)
+        seg_counts = torch.cat(self.segs_count).to(torch.float32)
+        print(f"max_path_len = {torch.max(path_lens).item()}")
+        print(f"avg_path_len = {torch.mean(path_lens).item()}")
+        print(f"max_traj_len = {torch.max(traj_lens).item()}")
+        print(f"avg_traj_len = {torch.mean(traj_lens).item()}")
+        print(f"max_segs = {torch.max(seg_counts).item()}")
+        print(f"avg_segs = {torch.mean(seg_counts).item()}")
 
     def __len__(self) -> int:
         """
@@ -81,7 +95,7 @@ class LaDeCachedDataset(Dataset):
 
         return trajs, paths, graph, heatmap
 
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    def __getitem__(self, idx: int) -> Tuple[Tensor, ...]:
         """
         Return the sample at the given index
         :param idx: the index of the sample
@@ -93,7 +107,7 @@ class LaDeCachedDataset(Dataset):
         heatmap = self.heatmap[idx].to(DEVICE)  # (2, H, W)
 
         if self.enable_augmentation:
-            return self.augmentation(trajs, paths, graph, heatmap)
+            trajs, paths, graph, heatmap = self.augmentation(trajs, paths, graph, heatmap)
         return (trajs, paths, graph, heatmap)
 
     @staticmethod
@@ -104,9 +118,14 @@ class LaDeCachedDataset(Dataset):
         :return: a batch of samples
         """
         trajs_list, paths_list, graph_list, heatmap_list = zip(*batch_list)
+
+        segments = torch.stack(graph_list).flatten(2)  # (B, G, 2, 2) -> (B, G, 4)
+        valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
+        segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
+
         return {"trajs": torch.stack(trajs_list),
                 "paths": torch.stack(paths_list),
-                "graphs": torch.stack(graph_list),
+                "segs": segments,
                 "heatmaps": torch.stack(heatmap_list)}
 
 

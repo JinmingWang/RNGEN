@@ -3,6 +3,8 @@
 class SegmentGraph {
 public:
     Tensor segments;
+    int min_path_length = 4;
+    int max_path_length = 16;
 
     SegmentGraph();
     SegmentGraph(std::vector<Tensor> segment_list);
@@ -17,8 +19,6 @@ public:
     void draw(std::string color) const;
 
 private:
-    int min_path_length = 3;
-    int max_path_length = 10;
 
     std::vector<Tensor> growPath(std::vector<int> &visited_sid, std::vector<Tensor> path);
 };

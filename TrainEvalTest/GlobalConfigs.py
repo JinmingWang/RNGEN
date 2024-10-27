@@ -1,7 +1,7 @@
 # Global Configs contains values that do not always change
 
 # Dataset
-DATA_DIR = "./Dataset/Shanghai_10k_Lv1"
+DATA_DIR = "./Dataset/Shanghai_20k_Lv1"
 
 #
 N_TRAJS = 32

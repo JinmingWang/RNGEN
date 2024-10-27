@@ -1,5 +1,5 @@
-data_count=10000
-path=processed.pt
+data_count=20000
+path=/home/jimmy/Data/LaDe/processed_roads_Shanghai.pt
 graph_depth=4
 trajs_per_graph=64
 max_segs_per_graph=64
@@ -7,5 +7,5 @@ rotation=true
 scaling_range=0.2
 traj_step_mean=0.2
 traj_step_std=0.1
-traj_noise_std=0.03
+traj_noise_std=0.01
 traj_len=64
