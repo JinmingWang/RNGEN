@@ -23,9 +23,9 @@ class HungarianLoss(nn.Module):
 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if feature_weight is None:
-            self.f_w = torch.ones(1, 1, device=device, dtype=torch.float32)
+            self.f_w = torch.ones(1, 1, 1, device=device, dtype=torch.float32)
         else:
-            self.f_w = torch.tensor(feature_weight, device=device, dtype=torch.float32).view(1, -1)
+            self.f_w = torch.tensor(feature_weight, device=device, dtype=torch.float32).view(1, 1, -1)
 
     def forward_SeqMat(self, pred_nodes, target_nodes, pred_adj, target_adj):
         B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
@@ -91,13 +91,11 @@ class HungarianLoss(nn.Module):
         B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
         losses = []
 
-        for b in range(B):
-            # Step 1: Compute pairwise distance matrix (L2 distance) between nodes
-            cost_matrix = torch.cdist(pred_nodes[b] * self.f_w,
-                                      target_nodes[b] * self.f_w, p=2).cpu().detach().numpy()  # (N, N)
+        cost_matrices = torch.cdist(pred_nodes * self.f_w, target_nodes * self.f_w, p=2).cpu().detach().numpy()  # (B, N, N)
 
-            # Step 2: Apply Hungarian algorithm to find best node matches
-            row_ind, col_ind = linear_sum_assignment(cost_matrix)
+        for b in range(B):
+            # Step 2: Apply Hungarian algorithm to find the best node matches
+            row_ind, col_ind = linear_sum_assignment(cost_matrices[b])
 
             # Step 3: Compute node feature loss for matched pairs
             losses.append(self.base_loss(pred_nodes[b][row_ind], target_nodes[b][col_ind]))
