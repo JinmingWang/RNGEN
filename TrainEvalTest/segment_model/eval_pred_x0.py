@@ -1,55 +1,67 @@
 from Dataset import LaDeCachedDataset
+from TrainEvalTest.GlobalConfigs import *
+from TrainEvalTest.segment_model.configs import *
 from TrainEvalTest.Utils import *
 from Models import HungarianLoss, HungarianMode, SegmentsModel
 from Diffusion import DDIM
 
+from typing import Callable
+
 import torch
 
-def eval(batch: Dict[str, Tensor], models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
+def getEvalFunction() -> Callable:
     """
     Evaluate the model on the given batch
-    :param batch: The batch to evaluate
     :param encoder: The encoder model
     :param diffusion_net: The diffusion network model
     :param ddim: The diffusion scheduler
     :return: The figure and loss
     """
-    is_training = dict()
-    for name in models:
-        is_training[name] = models[name].training
-        models[name].eval()
+    test_set = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="test")
+    test_loader = torch.utils.data.DataLoader(test_set, batch_size=B, collate_fn=LaDeCachedDataset.collate_fn, shuffle=False)
 
-    with torch.no_grad():
-        traj_enc = models["traj_encoder"](batch["paths"])
-        noise = torch.randn_like(batch["segs"])
+    batch = next(iter(test_loader))
+    noise = torch.randn_like(batch["segs"])
 
-        def pred_func(noisy_contents: List[Tensor], t: Tensor):
-            noise_pred = models["DiT"](*noisy_contents, traj_enc, t)
-            return [noise_pred]
-            # return [x0_pred], [torch.randn_like(x0_pred)]
+    def eval(models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
 
-        pred = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
+        is_training = dict()
+        for name in models:
+            is_training[name] = models[name].training
+            models[name].eval()
 
-        # pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
+        with torch.no_grad():
+            traj_enc = models["traj_encoder"](batch["paths"])
 
-    # pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
+            def pred_func(noisy_contents: List[Tensor], t: Tensor):
+                noise_pred = models["DiT"](*noisy_contents, traj_enc, t)
+                return [noise_pred]
+                # return [x0_pred], [torch.randn_like(x0_pred)]
 
-    loss = HungarianLoss(HungarianMode.Seq)(pred, batch["segs"])
-    # loss = torch.nn.functional.mse_loss(pred_segs, batch["segs"])
+            pred = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
 
-    # joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
+            # pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
 
-    plot_manager = PlotManager(5, 2, 3)
-    plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
-    plot_manager.plotSegments(pred[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
-    plot_manager.plotSegments(pred[0], 0, 2, "Pred segs jointed")
-    plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
-    plot_manager.plotTrajs(batch["paths"][0], 1, 1, "Paths")
-    #plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
-    #plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
+        # pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
 
-    for name in models:
-        if is_training[name]:
-            models[name].train()
+        loss = HungarianLoss(HungarianMode.Seq)(pred, batch["segs"])
+        # loss = torch.nn.functional.mse_loss(pred_segs, batch["segs"])
 
-    return plot_manager.getFigure(), loss
+        # joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
+
+        plot_manager = PlotManager(5, 2, 3)
+        plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
+        plot_manager.plotSegments(pred[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
+        plot_manager.plotSegments(pred[0], 0, 2, "Pred segs jointed")
+        plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
+        plot_manager.plotTrajs(batch["paths"][0], 1, 1, "Paths")
+        #plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
+        #plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
+
+        for name in models:
+            if is_training[name]:
+                models[name].train()
+
+        return plot_manager.getFigure(), loss
+
+    return eval
