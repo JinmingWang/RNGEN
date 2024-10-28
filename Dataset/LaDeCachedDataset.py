@@ -101,6 +101,13 @@ class LaDeCachedDataset(Dataset):
         graph = self.graph_tensor[idx].to(DEVICE)   # (G, 2, 2)
         heatmap = self.heatmap[idx].to(DEVICE)  # (2, H, W)
 
+        # for each graph segments of shape (2, 2), [[x1, y1], [x2, y2]]
+        # sort the segments so that x1 < x2
+        graph = torch.where(
+            graph[:, 0, 0] > graph[:, 1, 0],
+            graph.flip(1),
+            graph
+        )
         if self.enable_augmentation:
             trajs, paths, graph, heatmap = self.augmentation(trajs, paths, graph, heatmap)
         return (trajs, paths, graph, heatmap)
