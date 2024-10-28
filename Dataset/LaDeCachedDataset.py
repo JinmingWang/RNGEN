@@ -82,11 +82,6 @@ class LaDeCachedDataset(Dataset):
         # graph data is unordered, so we need to shuffle it
         perm = torch.randperm(graph.shape[0])
         graph = graph[perm]
-        # The two nodes of each line segment are unordered, so we need to shuffle them
-        ordering = torch.randint(0, 2, (graph.shape[0],))
-        first_points = graph[torch.arange(graph.shape[0]), ordering]
-        second_points = graph[torch.arange(graph.shape[0]), 1 - ordering]
-        graph = torch.stack([first_points, second_points], dim=1)
 
         # traj and path data are ordered, so we need to shuffle them in the same way
         perm = torch.randperm(trajs.shape[0])

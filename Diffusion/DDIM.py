@@ -88,8 +88,9 @@ class DDIM:
             t = torch.tensor(t, device=self.device)
         if isinstance(next_t, int):
             next_t = torch.tensor(next_t, device=self.device)
-        mask = (t <= max(self.skip_step, 5)).to(torch.long).view(-1, 1, 1)
-        return pred_x0 * mask + self.diffusionForward(pred_x0, next_t, ϵ_pred) * (1 - mask)
+        return self.diffusionForward(pred_x0, next_t, ϵ_pred)
+        # mask = (t <= max(self.skip_step, 5)).to(torch.long).view(-1, 1, 1)
+        # return pred_x0 * mask + self.diffusionForward(pred_x0, next_t, ϵ_pred) * (1 - mask)
 
     @torch.no_grad()
     def diffusionBackward(self,

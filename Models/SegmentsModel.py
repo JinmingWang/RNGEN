@@ -53,7 +53,7 @@ class SegmentsModel(nn.Module):
 
         self.head = nn.Sequential(
             nn.Linear(256, 256),
-            nn.LeakyReLU(inplace=True),
+            Swish(),
             nn.Linear(256, d_in)
         )
 

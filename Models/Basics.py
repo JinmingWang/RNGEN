@@ -95,11 +95,13 @@ class CrossAttnBlock(nn.Module):
 
         self.q_proj = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_head * n_heads),
         )
 
         self.kv_proj = nn.Sequential(
             nn.LayerNorm(d_context),
+            Swish(),
             nn.Linear(d_context, (d_head + d_in) * n_heads),
         )
 
@@ -109,6 +111,7 @@ class CrossAttnBlock(nn.Module):
 
         self.ff = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_expand),
             Swish(),
             nn.Dropout(dropout),
@@ -152,17 +155,20 @@ class CrossAttentionBlockWithTime(nn.Module):
         self.H = n_heads
         self.d_head = d_head
         self.d_in = d_in
+        self.d_expand = d_expand
         self.scale = d_head ** -0.5
         self.dropout = nn.Dropout(dropout)
         self.d_time = d_time
 
         self.q_proj = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_head * n_heads),
         )
 
         self.kv_proj = nn.Sequential(
             nn.LayerNorm(d_context),
+            Swish(),
             nn.Linear(d_context, (d_head + d_in) * n_heads),
         )
 
@@ -173,19 +179,24 @@ class CrossAttentionBlockWithTime(nn.Module):
         self.time_proj = nn.Sequential(
             nn.Linear(d_time, d_time),
             Swish(),
-            nn.Linear(d_time, d_in)
+            nn.Linear(d_time, d_in + d_expand),
+            nn.Unflatten(-1, (1, -1))
         )
 
-        self.ff = nn.Sequential(
+        self.ff1 = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_expand),
+        )
+
+        self.ff2 = nn.Sequential(
             Swish(),
             nn.Dropout(dropout),
             nn.Linear(d_expand, d_out),
         )
 
-        torch.nn.init.zeros_(self.ff[-1].weight)
-        torch.nn.init.zeros_(self.ff[-1].bias)
+        torch.nn.init.zeros_(self.ff2[-1].weight)
+        torch.nn.init.zeros_(self.ff2[-1].bias)
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
@@ -207,8 +218,8 @@ class CrossAttentionBlockWithTime(nn.Module):
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
-        t = self.time_proj(t).view(B, 1, self.d_in)
-        return self.ff(x + t) + self.shortcut(x)
+        t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
+        return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
 
 
 class AttentionWithTime(nn.Module):
@@ -222,6 +233,7 @@ class AttentionWithTime(nn.Module):
         self.H = n_heads
         self.d_head = d_head
         self.d_in = d_in
+        self.d_expand = d_expand
         self.scale = d_head ** -0.5
         self.d_time = d_time
         self.dropout = nn.Dropout(dropout)
@@ -233,10 +245,9 @@ class AttentionWithTime(nn.Module):
 
         self.qkv_proj = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_qkv),
         )
-
-        self.score_lambda = nn.Parameter(torch.tensor(0.5))
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
         torch.nn.init.zeros_(self.merge_head_proj.weight)
@@ -245,18 +256,24 @@ class AttentionWithTime(nn.Module):
         self.time_proj = nn.Sequential(
             nn.Linear(d_time, d_time),
             Swish(),
-            nn.Linear(d_time, d_in)
+            nn.Linear(d_time, d_in + d_expand),
+            nn.Unflatten(-1, (1, -1))
         )
 
-        self.ff = nn.Sequential(
+        self.ff1 = nn.Sequential(
             nn.LayerNorm(d_in),
+            Swish(),
             nn.Linear(d_in, d_expand),
+        )
+
+        self.ff2 = nn.Sequential(
             Swish(),
             nn.Dropout(dropout),
             nn.Linear(d_expand, d_out),
         )
-        torch.nn.init.zeros_(self.ff[-1].weight)
-        torch.nn.init.zeros_(self.ff[-1].bias)
+
+        torch.nn.init.zeros_(self.ff2[-1].weight)
+        torch.nn.init.zeros_(self.ff2[-1].bias)
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
@@ -276,8 +293,8 @@ class AttentionWithTime(nn.Module):
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
-        t = self.time_proj(t).view(B, 1, self.d_in)
-        return self.shortcut(x) + self.ff(x + t)
+        t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
+        return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
 
 
 class Transpose(nn.Module):

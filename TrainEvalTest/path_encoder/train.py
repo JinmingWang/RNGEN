@@ -17,37 +17,24 @@ from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
-    traj_encoder = PathEncoder(N_TRAJS, L_TRAJ, 9, 128).to(DEVICE)
-    graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
-    graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
-    DiT = SegmentsModel(d_in=16, d_traj_enc=128, n_layers=12, T=T, pred_x0=True).to(DEVICE)
-
-    # Model-S:
-    # traj_encoder: d_encode = 128
-    # DiT: d_in = 16, d_traj_enc = 128, n_layers = 12
-
-    # Model-M:
-    # traj_encoder: d_encode = 192
-    # DiT: d_in = 16, d_traj_enc = 192, n_layers = 14
-
-    # Model-L:
-    # traj_encoder: d_encode = 256
-    # DiT: d_in = 16, d_traj_enc = 256, n_layers = 16
+    traj_encoder = PathEncoder(N_TRAJS, L_PATH, L_PATH, 64, 2).to(DEVICE)
+    # graph_encoder = GraphEncoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=8, dropout=0.0).to(DEVICE)
+    # graph_decoder = GraphDecoder(d_latent=16, d_head=64, d_expand=512, d_hidden=128, n_heads=16, n_layers=4, dropout=0.0).to(DEVICE)
+    DiT = SegmentsModel(d_in=5, d_traj_enc=64, n_layers=8, T=T, pred_x0=True).to(DEVICE)
 
     # Load pre-trained graph VAE, it will be always frozen
-    loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
-    graph_encoder.eval()
-    graph_decoder.eval()
+    # loadModels(GRAPH_VAE_WEIGHT, graph_encoder, graph_decoder)
+    # graph_encoder.eval()
+    # graph_decoder.eval()
 
-    traj_encoder.eval()
+    # torch.set_float32_matmul_precision('high')
+    # traj_encoder = torch.compile(traj_encoder)
+    # graph_encoder = torch.compile(graph_encoder)
+    # graph_decoder = torch.compile(graph_decoder)
+    #DiT = torch.compile(DiT)
 
-    torch.set_float32_matmul_precision('high')
-    traj_encoder = torch.compile(traj_encoder)
-    graph_encoder = torch.compile(graph_encoder)
-    graph_decoder = torch.compile(graph_decoder)
-    DiT = torch.compile(DiT)
-
-    return {"traj_encoder": traj_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
+    return {"traj_encoder": traj_encoder, "DiT": DiT}
+    # return {"traj_encoder": traj_encoder, "graph_encoder": graph_encoder, "graph_decoder": graph_decoder, "DiT": DiT}
 
 
 def train():
@@ -83,19 +70,16 @@ def train():
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
 
-                with torch.no_grad():
-                    batch["graph_enc"], _ = models["graph_encoder"](batch["segs"])
-
-                noise = torch.randn_like(batch["graph_enc"])
+                noise = torch.zeros_like(batch["segs"])
 
                 t = torch.zeros((B,), device=DEVICE, dtype=torch.long)
 
                 optimizer.zero_grad()
 
-                traj_enc = models["traj_encoder"](batch["trajs"])
+                traj_enc = models["traj_encoder"](batch["paths"])
                 pred = models["DiT"](noise, traj_enc, t)
 
-                loss = loss_func(pred, batch["graph_enc"])
+                loss = loss_func(pred, batch["segs"])
 
                 loss.backward()
 
@@ -116,24 +100,25 @@ def train():
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
             if e % EVAL_INTERVAL == 0:
-                with torch.no_grad():
-                    pred_segs, pred_joints = models["graph_decoder"](pred)
+                # with torch.no_grad():
+                #     pred_segs, pred_joints = models["graph_decoder"](pred)
 
-                pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
-                joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
+                # pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
+                # joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
 
-                eval_loss = loss_func(pred_segs, batch["segs"])
+                # eval_loss = loss_func(pred_segs, batch["segs"])
 
                 plot_manager = PlotManager(5, 2, 3)
                 plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
-                plot_manager.plotSegments(pred_segs[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
-                plot_manager.plotSegments(pred_segs_jointed, 0, 2, "Pred segs jointed")
+                plot_manager.plotSegments(pred[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
+                plot_manager.plotSegments(pred[0], 0, 2, "Pred segs jointed")
                 plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
-                plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
-                plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
+                plot_manager.plotTrajs(batch["paths"][0], 1, 1, "Paths")
+                # plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
+                # plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
 
                 writer.add_figure("Evaluation", plot_manager.getFigure(), global_step)
-                writer.add_scalar("loss/eval", eval_loss.item(), global_step)
+                writer.add_scalar("loss/eval", loss.item(), global_step)
 
             saveModels(LOG_DIR + "last.pth", models["DiT"], models["traj_encoder"])
             if total_loss < best_loss:
