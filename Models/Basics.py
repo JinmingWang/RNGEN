@@ -327,20 +327,23 @@ class Transpose(nn.Module):
 
 
 class Res2D(nn.Module):
-    def __init__(self, d_in: int, d_out: int):
+    def __init__(self, d_in: int, d_mid: int, d_out: int):
         super().__init__()
 
         self.layers = nn.Sequential(
-            nn.Conv2d(d_in, d_in * 2, 3, 1, 1),
-            nn.BatchNorm2d(d_in * 2),
+            nn.Conv2d(d_in, d_mid, 3, 1, 1),
+            nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv2d(d_in * 2, d_in * 2, 3, 1, 1),
-            nn.BatchNorm2d(d_in * 2),
+            nn.Conv2d(d_mid, d_mid, 1, 1, 0),
+            nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv2d(d_in * 2, d_out, 3, 1, 1)
+            nn.Conv2d(d_mid, d_out, 3, 1, 1)
         )
 
-        self.shortcut = nn.Identity() if d_in == d_out else nn.Conv2d(d_in, d_out, 1, 1, 0)
+        torch.nn.init.zeros_(self.layers[-1].weight)
+        torch.nn.init.zeros_(self.layers[-1].bias)
+
+        self.shortcut = nn.Identity() if d_in == d_out else nn.Conv1d(d_in, d_out, 1, 1, 0)
 
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
@@ -354,7 +357,7 @@ class Res1D(nn.Module):
             nn.Conv1d(d_in, d_mid, 3, 1, 1),
             nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv1d(d_mid, d_mid, 1, 1, 0),
+            nn.Conv1d(d_mid, d_mid, 3, 1, 1),
             nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_out, 3, 1, 1)
@@ -367,6 +370,7 @@ class Res1D(nn.Module):
 
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
+
 class Conv2dBnAct(nn.Sequential):
     def __init__(self, d_in: int, d_out: int, k: int, s: 1, p: 0):
         super().__init__(
@@ -403,14 +407,21 @@ class Rearrange(nn.Module):
         return rearrange(x, self.from_shape + ' -> ' + self.to_shape, **self.kwargs)
 
 
-def cacheArgumentsUponInit(cls):
+def cacheArgumentsUponInit(original_init):
     # set an attribute with the same name and value as whatever is passed to __init__
-    def newInit(self, *args, **kwargs):
-        self.__dict__.update(kwargs)
-        self.__dict__.update({arg: val for arg, val in zip(getfullargspec(cls.__init__).args[1:], args)})
-        cls.__init__(self, *args, **kwargs)
-    cls.__init__ = newInit
-    return cls
+    def __init__(self, *args, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+        # get names of args
+        argspec = getfullargspec(original_init)
+        for i, arg in enumerate(argspec.args):
+            if i < len(args):
+                setattr(self, arg, args[i])
+
+        original_init(self, *args, **kwargs)
+
+    return __init__
 
 def xyxy2xydl(xyxy: Tensor) -> Tensor:
     """

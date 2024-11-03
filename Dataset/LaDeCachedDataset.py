@@ -9,8 +9,7 @@ class LaDeCachedDataset(Dataset):
     def __init__(self,
                  folder_path: str,
                  max_trajs: int = 32,
-                 set_name: str = "train",
-                 no_padding: bool = False) -> None:
+                 set_name: str = "train") -> None:
         """
         Initialize the dataset, this class loads data from a cache file
         The cache file is created by using LaDeDatasetCacheGenerator class
@@ -21,7 +20,6 @@ class LaDeCachedDataset(Dataset):
         self.max_trajs = max_trajs
         self.set_name = set_name
         self.enable_augmentation = set_name == "train"
-        self.no_padding = no_padding
 
         self.trajs = torch.load(folder_path + "/trajs.pth")
         data_count = len(self.trajs)
@@ -208,54 +206,54 @@ class LaDeCachedDataset(Dataset):
 
         return {"joints": joint_matrix.to(torch.float32)}
 
+    @staticmethod
+    def getTargetHeatmaps(segs: Float[Tensor, "B N 5"], H: int, W: int, line_width: float = 4.0, supersample: int = 5) -> Dict[str, Float[Tensor, "B 1 H W"]]:
+        """
+        Compute the target heatmaps for the given segments
+        :param segs: the segments tensor
+        :param H: the height of the heatmap
+        :param W: the width of the heatmap
+        :param line_width: the width of the line
+        :param supersample: the supersampling factor
+        :return: the target heatmaps of shape (B, 1, H, W)
+        """
+
+        B, N, _ = segs.shape
+        heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.bool)
+        src_points, dst_points, is_valid = torch.split(segs, [2, 2, 1], dim=2)
+        s = supersample
+        for b in range(B):
+            heatmap = LaDeCachedDataset._gen_line_mask((H * s, W * s), src_points[b] * s, dst_points[b] * s, line_width * s)
+            heatmap = reduce(heatmap.float(), "(h hs) (w ws) -> h w", "mean", hs=s, ws=s)
+            heatmaps[b, 0] = heatmap
+
+        return {"target_heatmaps": heatmaps}
 
     @staticmethod
-    def xyxy2xydl(xyxy: Tensor) -> Tensor:
-        """
-        Convert a segment (x1, y1, x2, y2) to a segment (x_center, y_center, direction, length)
-        Why? Because a segment in x1y1x2y2 format can also be represented in x2y2x1y1 format,
-        this non-uniqueness is problematic. Imagine a segment (x1, y1, x2, y2), if the model predicts
-        (x2, y2, x1, y1) instead, it should be considered correct. Or, if two given segments are (x1, y1, x2, y2) and
-        (x2, y2, x1, y1), the attention mechanism should be able to match them as if they are the same segment.
-        :param xyxy: The segments (B, N, 5), where 5 is (x1, y1, x2, y2, is_valid)
-        :return: The segments in (B, N, 5) format
-        """
-        # Unbind the input tensor to get x1, y1, x2, y2
-        x1, y1, x2, y2, valid_mask = torch.unbind(xyxy, dim=-1)
+    def _gen_line_mask(shape: Tuple[int, int], src: Float[Tensor, "D=2"], dst: Float[Tensor, "D=2"], lw: float) -> Bool[Tensor, "H W"]:
+        device = src.device
 
-        # Compute center coordinates
-        x_c, y_c = (x1 + x2) / 2, (y1 + y2) / 2
+        # Generate a pixel grid.
+        h, w = shape
+        x = torch.arange(w, device=device) + 0.5
+        y = torch.arange(h, device=device) + 0.5
+        xy = torch.stack(torch.meshgrid(x, y, indexing="xy"), dim=-1)
 
-        # Compute the length of each segment
-        lengths = torch.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        # Define a vector between the start and end points.
+        delta = dst - src
+        delta_norm = delta.norm(dim=-1, keepdim=True)
+        u_delta = delta / delta_norm
 
-        # Compute the direction and ensure it's in the range [0, pi)
-        directions = torch.atan2(y2 - y1, x2 - x1)
-        directions = torch.remainder(directions, torch.pi)
+        # Define a vector between each pixel and the start point.
+        indicator = xy - src[:, None, None]
 
-        # Return the concatenated result
-        return torch.stack([x_c, y_c, directions, lengths, valid_mask], dim=-1)
+        # Determine whether each pixel is inside the line in the parallel direction.
+        parallel = einsum(u_delta, indicator, "l xy, l h w xy -> l h w")
+        parallel_inside_line = (parallel <= delta_norm[..., None]) & (parallel > 0)
 
+        # Determine whether each pixel is inside the line in the perpendicular direction.
+        perpendicular = indicator - parallel[..., None] * u_delta[:, None, None]
+        perpendicular_inside_line = perpendicular.norm(dim=-1) < (0.5 * lw)
 
-    @staticmethod
-    def xydl2xyxy(xydl: Tensor) -> Tensor:
-        """
-        Convert a segment (x_center, y_center, direction, length) to a segment (x1, y1, x2, y2)
-        :param xydl: The segments (B, N, 5), where 5 is (x_center, y_center, direction, length, is_valid)
-        :return: The segments in (B, N, 5) format
-        """
-        # Unbind the input tensor to get x_c, y_c, directions, lengths
-        x_c, y_c, directions, lengths, valid_mask = torch.unbind(xydl, dim=-1)
-
-        # Compute half-length components
-        half_dx = (lengths / 2) * torch.cos(directions)
-        half_dy = (lengths / 2) * torch.sin(directions)
-
-        # Compute x1, y1, x2, y2 based on the center and direction
-        x1, y1 = x_c - half_dx, y_c - half_dy
-        x2, y2 = x_c + half_dx, y_c + half_dy
-
-        # Return the concatenated result
-        return torch.stack([x1, y1, x2, y2, valid_mask], dim=-1)
-
+        return (parallel_inside_line & perpendicular_inside_line).any(dim=0)
 
