@@ -1,5 +1,5 @@
 from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.CrossDomainVAE.configs import *
+from TrainEvalTest.SmallMapUNet.configs import *
 from TrainEvalTest.Utils import *
 
 import torch

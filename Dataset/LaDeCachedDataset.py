@@ -126,10 +126,13 @@ class LaDeCachedDataset(Dataset):
         valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
         segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
 
+        heatmaps = torch.stack(heatmap_list)
+
         return {"trajs": torch.stack(trajs_list),
                 "paths": torch.stack(paths_list),
                 "segs": segments,
-                "heatmaps": torch.stack(heatmap_list)}
+                "heatmaps": heatmaps[:, 0:1],
+                "nodemaps": heatmaps[:, 1:2]}
 
 
     @staticmethod
@@ -219,7 +222,7 @@ class LaDeCachedDataset(Dataset):
         """
 
         B, N, _ = segs.shape
-        heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.bool)
+        heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.float32)
         src_points, dst_points, is_valid = torch.split(segs, [2, 2, 1], dim=2)
         s = supersample
         for b in range(B):
@@ -248,7 +251,9 @@ class LaDeCachedDataset(Dataset):
         indicator = xy - src[:, None, None]
 
         # Determine whether each pixel is inside the line in the parallel direction.
-        parallel = torch.einsum(u_delta, indicator, "l xy, l h w xy -> l h w")
+        # indicator: (L, H, W, 2)
+        # u_delta: (L, 2)
+        parallel = (indicator * u_delta.view(-1, 1, 1, 2)).sum(dim=-1)
         parallel_inside_line = (parallel <= delta_norm[..., None]) & (parallel > 0)
 
         # Determine whether each pixel is inside the line in the perpendicular direction.
