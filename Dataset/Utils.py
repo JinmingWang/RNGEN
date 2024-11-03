@@ -6,8 +6,8 @@ import random
 
 Tensor = torch.Tensor
 
-Node = Tensor  # (2,)
-Trajectory = Tensor  # (T, 2)
+Node = Float[Tensor, "B 2"]
+Trajectory = Float[Tensor, "B T 2"]
 
 # LaDe Dataset: https://arxiv.org/abs/2306.10675
 DATASET_ROOT = "/home/jimmy/Data/LaDe"
