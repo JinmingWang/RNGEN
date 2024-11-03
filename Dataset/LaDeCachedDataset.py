@@ -248,7 +248,7 @@ class LaDeCachedDataset(Dataset):
         indicator = xy - src[:, None, None]
 
         # Determine whether each pixel is inside the line in the parallel direction.
-        parallel = einsum(u_delta, indicator, "l xy, l h w xy -> l h w")
+        parallel = torch.einsum(u_delta, indicator, "l xy, l h w xy -> l h w")
         parallel_inside_line = (parallel <= delta_norm[..., None]) & (parallel > 0)
 
         # Determine whether each pixel is inside the line in the perpendicular direction.

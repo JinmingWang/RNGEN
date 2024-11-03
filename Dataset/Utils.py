@@ -1,7 +1,7 @@
 import torch
 from typing import List, Tuple, Set, FrozenSet, Literal, Dict
 from jaxtyping import Float, Bool
-from einops import rearrange, einsum, reduce
+from einops import rearrange, reduce
 import random
 
 Tensor = torch.Tensor
