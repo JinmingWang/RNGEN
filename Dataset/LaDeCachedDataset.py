@@ -224,9 +224,21 @@ class LaDeCachedDataset(Dataset):
         B, N, _ = segs.shape
         heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.float32)
         src_points, dst_points, is_valid = torch.split(segs, [2, 2, 1], dim=2)
+
+        is_valid = is_valid.bool()
+
+        # since src and dst are in range -3 to 3, we need to scale them to the heatmap size
+        HW = torch.tensor([H, W], device=DEVICE).float()
+        src_points = (src_points + 3) / 6 * HW
+        dst_points = (dst_points + 3) / 6 * HW
+
         s = supersample
         for b in range(B):
-            heatmap = LaDeCachedDataset._gen_line_mask((H * s, W * s), src_points[b] * s, dst_points[b] * s, line_width * s)
+            heatmap = LaDeCachedDataset._gen_line_mask(
+                (H * s, W * s),
+                src_points[b][is_valid[b]].view(-1, 2) * s,
+                dst_points[b][is_valid[b]].view(-1, 2) * s,
+                line_width * s)
             heatmap = reduce(heatmap.float(), "(h hs) (w ws) -> h w", "mean", hs=s, ws=s)
             heatmaps[b, 0] = heatmap
 
