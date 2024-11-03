@@ -91,7 +91,15 @@ class HungarianLoss(nn.Module):
         B, N, D = pred_nodes.shape  # Batch size, number of nodes, feature dimension
         losses = []
 
-        cost_matrices = torch.cdist(pred_nodes * self.f_w, target_nodes * self.f_w, p=2).cpu().detach().numpy()  # (B, N, N)
+        pred_swap = pred_nodes.flip(2)
+
+
+        cost_matrices_A = torch.cdist(pred_nodes * self.f_w, target_nodes * self.f_w, p=2)  # (B, N, N)
+        cost_matrices_B = torch.cdist(pred_swap * self.f_w, target_nodes * self.f_w, p=2)
+
+        cost_matrices = torch.min(cost_matrices_A, cost_matrices_B).detach().cpu().numpy()
+
+        num_corrects = 0
 
         for b in range(B):
             # Step 2: Apply Hungarian algorithm to find the best node matches
@@ -100,7 +108,23 @@ class HungarianLoss(nn.Module):
             # Step 3: Compute node feature loss for matched pairs
             losses.append(self.base_loss(pred_nodes[b][row_ind], target_nodes[b][col_ind]))
 
-        return torch.stack(losses).mean()
+            pred_matches = pred_nodes[b][row_ind][:, -1]
+            target_matches = target_nodes[b][col_ind][:, -1]
+
+            losses.append(nn.functional.binary_cross_entropy(pred_matches, target_matches))
+            num_corrects += torch.sum(pred_matches >= 0.5).item()
+
+            # Step 4: Since we expect number of target <= number of pred
+            # The unmatched pred nodes should all be zero
+            # So now we need to find the unmatched pred nodes
+            unmatched_ids = [i for i in range(N) if i not in row_ind]
+            if len(unmatched_ids) > 0:
+                pred_unmatched = pred_nodes[b][unmatched_ids][:, -1]
+                target_unmatched = torch.zeros_like(pred_unmatched)
+                losses.append(nn.functional.binary_cross_entropy(pred_unmatched, target_unmatched))
+                num_corrects += torch.sum(pred_unmatched < 0.5)
+
+        return torch.stack(losses).mean(), num_corrects
 
     def forward(self, *args, **kwargs):
         match (self.mode):

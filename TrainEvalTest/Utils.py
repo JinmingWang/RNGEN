@@ -10,7 +10,7 @@ import time
 from typing import List, Tuple, Dict
 Tensor = torch.Tensor
 
-def loadModels(path: str, *models: torch.nn.Module) -> torch.nn.Module:
+def loadModels(path: str, **models: torch.nn.Module) -> None:
     """
     Load models from a file
     :param path: The path to the file
@@ -18,12 +18,11 @@ def loadModels(path: str, *models: torch.nn.Module) -> torch.nn.Module:
     :return: The loaded models
     """
     state_dicts = torch.load(path)
-    for model in models:
-        model.load_state_dict(state_dicts[model.__class__.__name__])
-    return models
+    for name, model in models.items():
+        model.load_state_dict(state_dicts[name])
 
 
-def saveModels(path: str, *models: torch.nn.Module) -> None:
+def saveModels(path: str, **models: torch.nn.Module) -> None:
     """
     Save models to a file
     :param path: The path to the file
@@ -31,8 +30,8 @@ def saveModels(path: str, *models: torch.nn.Module) -> None:
     :return: None
     """
     state_dicts = {}
-    for model in models:
-        state_dicts[model.__class__.__name__] = model.state_dict()
+    for name, model in models.items():
+        state_dicts[name] = model.state_dict()
     torch.save(state_dicts, path)
 
 
@@ -68,22 +67,25 @@ class PlotManager:
         self.fig, self.axs = plt.subplots(grid_rows, grid_cols, figsize=(grid_cols * cell_size, grid_rows * cell_size))
         self.axs = np.atleast_2d(self.axs)  # Ensure axs is 2D, even if it's a single row/col
 
-    def plotSegments(self, segs, row, col, title):
+    def plotSegments(self, segs, row, col, title, refresh=True, color=None):
         """
         Plot line segments given a tensor of shape (N, 5), where N is the number of segments
         and each segment is defined by two points in 2D.
         """
         ax = self.axs[row, col]
-        ax.clear()  # Clear previous content
+        if refresh:
+            ax.clear()  # Clear previous content
         ax.set_title(title, fontsize=14, color='darkblue')
 
         # Extract the points for each line segment
         for seg in segs:
             x = seg[[0, 2]].cpu().detach().numpy()  # X coordinates
             y = seg[[1, 3]].cpu().detach().numpy() # Y coordinates
-            seg_validity = seg[4].cpu().detach().numpy()  # Validity of the segment
-            ax.plot(x, y, marker='.', linestyle='-', color='#63B2EE', markersize=10 * seg_validity, markerfacecolor='#76DA91',
-                    lw=2 * seg_validity)
+            if len(seg) == 3:
+                seg_validity = seg[4].cpu().detach().numpy()  # Validity of the segment
+                ax.plot(x, y, marker='.', linestyle='-', markersize=5 * seg_validity, lw=seg_validity, alpha=0.5, color=color)
+            else:
+                ax.plot(x, y, marker='.', linestyle='-', markersize=5, alpha=0.5, color=color)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])

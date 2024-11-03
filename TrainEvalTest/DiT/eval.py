@@ -1,6 +1,6 @@
 from Dataset import LaDeCachedDataset
 from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.segment_model.configs import *
+from TrainEvalTest.DiT.configs import *
 from TrainEvalTest.Utils import *
 from Models import HungarianLoss, HungarianMode, SegmentsModel
 from Diffusion import DDIM
@@ -21,7 +21,8 @@ def getEvalFunction() -> Callable:
     test_loader = torch.utils.data.DataLoader(test_set, batch_size=B, collate_fn=LaDeCachedDataset.collate_fn, shuffle=False)
 
     batch = next(iter(test_loader))
-    noise = torch.randn_like(batch["segs"])
+
+    noise = torch.randn(B, N_TRAJS, L_PATH, 2).to(batch["paths"].device)
 
     def eval(models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
 
@@ -31,32 +32,20 @@ def getEvalFunction() -> Callable:
             models[name].eval()
 
         with torch.no_grad():
-            traj_enc = models["traj_encoder"](batch["paths"])
 
             def pred_func(noisy_contents: List[Tensor], t: Tensor):
-                noise_pred = models["DiT"](*noisy_contents, traj_enc, t)
-                return [noise_pred]
-                # return [x0_pred], [torch.randn_like(x0_pred)]
+                pred = models["DiT"](*noisy_contents, batch["trajs"], t)
+                return [pred]
 
-            pred = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
+            pred_paths = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
 
-            # pred_segs, pred_joints = models["graph_decoder"](pred_graph_enc)
+        loss = torch.nn.functional.mse_loss(pred_paths, batch["paths"])
 
-        # pred_segs_jointed = matchJoints(pred_segs[0], pred_joints[0])
-
-        loss = HungarianLoss(HungarianMode.Seq)(pred, batch["segs"])
-        # loss = torch.nn.functional.mse_loss(pred_segs, batch["segs"])
-
-        # joints = LaDeCachedDataset.getJointsFromSegments(batch["segs"][0:1])["joints"]
-
-        plot_manager = PlotManager(5, 2, 3)
+        plot_manager = PlotManager(5, 1, 4)
         plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
-        plot_manager.plotSegments(pred[0], 0, 1, f"Pred segs (Loss: {loss.item():.3e})")
-        plot_manager.plotSegments(pred[0], 0, 2, "Pred segs jointed")
-        plot_manager.plotTrajs(batch["trajs"][0], 1, 0, "Trajectories")
-        plot_manager.plotTrajs(batch["paths"][0], 1, 1, "Paths")
-        #plot_manager.plotHeatmap(joints[0], 1, 1, "Joints")
-        #plot_manager.plotHeatmap(pred_joints[0], 1, 2, "Pred joints")
+        plot_manager.plotTrajs(batch["trajs"][0], 0, 1, "Trajectories")
+        plot_manager.plotTrajs(batch["paths"][0], 0, 2, "Paths")
+        plot_manager.plotTrajs(pred_paths[0], 0, 3, "Pred Paths")
 
         for name in models:
             if is_training[name]:

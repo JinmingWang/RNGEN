@@ -25,7 +25,12 @@ class LaDeCachedDataset(Dataset):
 
         self.trajs = torch.load(folder_path + "/trajs.pth")
         data_count = len(self.trajs)
-        slicing = slice(int(data_count * 0.8)) if set_name == "train" else slice(int(data_count * 0.8), None)
+        if set_name == "train":
+            slicing = slice(int(data_count * 0.8))
+        elif set_name == "test":
+            slicing = slice(int(data_count * 0.8), None)
+        elif set_name == "debug":
+            slicing = slice(100)
 
         self.trajs = self.trajs[slicing]
         self.paths = torch.load(folder_path + "/paths.pth")[slicing]
@@ -101,25 +106,11 @@ class LaDeCachedDataset(Dataset):
         graph = self.graph_tensor[idx].to(DEVICE)   # (G, 2, 2)
         heatmap = self.heatmap[idx].to(DEVICE)  # (2, H, W)
 
-        trajs = torch.where(
-            trajs[:, 0, 0] > trajs[:, 1, 0],
-            trajs.flip(1),
-            trajs
-        )
-
-        paths = torch.where(
-            trajs[:, 0, 0] > trajs[:, 1, 0],
-            paths.flip(1),
-            paths
-        )
-
         # for each graph segments of shape (2, 2), [[x1, y1], [x2, y2]]
         # sort the segments so that x1 < x2
-        graph = torch.where(
-            graph[:, 0, 0] > graph[:, 1, 0],
-            graph.flip(1),
-            graph
-        )
+        graph_swap = graph.flip(1)
+        swap_indices = graph[:, 0, 0] > graph[:, 1, 0]
+        graph[swap_indices] = graph_swap[swap_indices]
         if self.enable_augmentation:
             trajs, paths, graph, heatmap = self.augmentation(trajs, paths, graph, heatmap)
         return (trajs, paths, graph, heatmap)
@@ -266,9 +257,5 @@ class LaDeCachedDataset(Dataset):
 
         # Return the concatenated result
         return torch.stack([x1, y1, x2, y2, valid_mask], dim=-1)
-
-
-
-
 
 

@@ -17,7 +17,8 @@ class DDIM:
                  max_diffusion_step: int = 100,
                  device: str = 'cuda',
                  scale_mode: Literal["linear", "quadratic", "log"] = "linear",
-                 skip_step=1):
+                 skip_step=1,
+                 data_dim: int = 2):
 
         if scale_mode == "quadratic":
             betas = torch.linspace(min_beta ** 0.5, max_beta ** 0.5, max_diffusion_step).to(device) ** 2
@@ -36,11 +37,14 @@ class DDIM:
             product *= alpha
             alpha_bars[i] = product
         self.T = max_diffusion_step
-        self.β = betas.view(-1, 1, 1)  # (T, 1, 1)
-        self.α = alphas.view(-1, 1, 1)  # (T, 1, 1)
-        self.αbar = alpha_bars.view(-1, 1, 1)  # (T, 1, 1)
-        self.sqrt_αbar = torch.sqrt(alpha_bars).view(-1, 1, 1)  # (T, 1, 1)
-        self.sqrt_1_m_αbar = torch.sqrt(1 - alpha_bars).view(-1, 1, 1)  # (T, 1, 1)
+
+        expand_shape = [-1] + [1] * data_dim
+
+        self.β = betas.view(*expand_shape)  # (T, 1, 1)
+        self.α = alphas.view(*expand_shape)  # (T, 1, 1)
+        self.αbar = alpha_bars.view(*expand_shape)  # (T, 1, 1)
+        self.sqrt_αbar = torch.sqrt(alpha_bars).view(*expand_shape)  # (T, 1, 1)
+        self.sqrt_1_m_αbar = torch.sqrt(1 - alpha_bars).view(*expand_shape)  # (T, 1, 1)
 
         self.σ = 0.0
 
@@ -88,9 +92,9 @@ class DDIM:
             t = torch.tensor(t, device=self.device)
         if isinstance(next_t, int):
             next_t = torch.tensor(next_t, device=self.device)
-        return self.diffusionForward(pred_x0, next_t, ϵ_pred)
-        # mask = (t <= max(self.skip_step, 5)).to(torch.long).view(-1, 1, 1)
-        # return pred_x0 * mask + self.diffusionForward(pred_x0, next_t, ϵ_pred) * (1 - mask)
+        # return self.diffusionForward(pred_x0, next_t, ϵ_pred)
+        mask = (t <= max(self.skip_step, 5)).to(torch.long).view(-1, 1, 1)
+        return pred_x0 * mask + self.diffusionForward(pred_x0, next_t, ϵ_pred) * (1 - mask)
 
     @torch.no_grad()
     def diffusionBackward(self,
