@@ -210,7 +210,7 @@ class LaDeCachedDataset(Dataset):
         return {"joints": joint_matrix.to(torch.float32)}
 
     @staticmethod
-    def getTargetHeatmaps(segs: Float[Tensor, "B N 5"], H: int, W: int, line_width: float = 4.0, supersample: int = 5) -> Dict[str, Float[Tensor, "B 1 H W"]]:
+    def getTargetHeatmaps(segs: Float[Tensor, "B N 5"], H: int, W: int, line_width: float = 2.0, supersample: int = 5) -> Dict[str, Float[Tensor, "B 1 H W"]]:
         """
         Compute the target heatmaps for the given segments
         :param segs: the segments tensor
@@ -225,7 +225,7 @@ class LaDeCachedDataset(Dataset):
         heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.float32)
         src_points, dst_points, is_valid = torch.split(segs, [2, 2, 1], dim=2)
 
-        is_valid = is_valid.bool()
+        is_valid = is_valid.bool().repeat(1, 1, 2)
 
         # since src and dst are in range -3 to 3, we need to scale them to the heatmap size
         HW = torch.tensor([H, W], device=DEVICE).float()
