@@ -26,7 +26,7 @@ def train():
     # loadModels("Runs/PathsDiT/241030_0853_Initial/last.pth", DiT=DiT)
     # DiT.eval()
 
-    vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4).to(DEVICE)
+    vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4, threshold=0.5).to(DEVICE)
 
     # torch.set_float32_matmul_precision("high")
     # vae = torch.compile(vae)
@@ -69,7 +69,7 @@ def train():
                 filter_mask = ~torch.any(batch["duplicate_segs"] == 0, dim=2, keepdim=True)
                 batch["duplicate_segs"] = batch["duplicate_segs"] * filter_mask
 
-                z_mean, z_logvar, duplicate_segs, cluster_mat, unique_segs = vae(batch["paths"])
+                z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["paths"])
                 kll = kl_loss_func(z_mean, z_logvar)
                 rec = rec_loss_func(duplicate_segs, batch["duplicate_segs"])
                 cll = cluster_loss_func(duplicate_segs.detach(), cluster_mat, batch["segs"][..., :-1])
@@ -101,13 +101,11 @@ def train():
 
             # Compute mean for each cluster
             #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
-            remain_indices = torch.abs(unique_segs[0]).sum(axis=1) > 1e-3
-            graph_segs = unique_segs[0][remain_indices]
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotTrajs(batch["paths"][0], 0, 0, "Paths")
+            plot_manager.plotTrajs(batch["Routes"][0], 0, 0, "Paths")
             plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs")
-            plot_manager.plotSegments(graph_segs, 0, 2, "Pred Segs")
+            plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs")
             plot_manager.plotSegments(batch["duplicate_segs"][0], 0, 3, "Duplicate Segs")
             plot_manager.plotSegments(duplicate_segs[0], 0, 4, "Pred Duplicate Segs")
 

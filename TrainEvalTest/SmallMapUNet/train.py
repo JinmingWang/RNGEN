@@ -23,7 +23,7 @@ def train():
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
 
 
-    loss_func = torch.nn.MSELoss()
+    loss_func = torch.nn.BCELoss()
 
     # Optimizer & Scheduler
     optimizer = AdamW(list(stage_1.parameters()) + list(stage_2.parameters()), lr=LR)

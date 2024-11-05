@@ -6,6 +6,7 @@ from rich.table import Table
 from rich.live import Live
 from threading import Thread
 import time
+from jaxtyping import Float
 
 from typing import List, Tuple, Dict
 Tensor = torch.Tensor
@@ -337,8 +338,6 @@ class ProgressManager:
         while not self.thread_stop:
             self.live.update(self.render_progress_table(self.current_epoch))
             time.sleep(self.refresh_interval)
-
-
 
 
 class MovingAvg():

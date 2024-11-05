@@ -28,32 +28,48 @@ class MultiHeadSelfRelationMatrix(nn.Module):
 class DRAC(nn.Module):
     def __init__(self, threshold: float=0.5):
         super().__init__()
+        """
+        DRAC: Duplicate Removal and Cluster Averaging for Cross-Domain Trajectory Prediction
+        """
         self.threshold = threshold
 
 
-    def forward(self, seqs: Tensor, cluster_mat: Tensor):
-        # x: (B, L, D)
+    def forward(self, seqs: Float[Tensor, "B L D"], cluster_mat: Float[Tensor, "B L L"]):
         B, L, D = seqs.shape
-        # cluster_mat[i, j] = 1 if x[i] and x[j] are in the same cluster
 
-        cluster_mat = (cluster_mat > self.threshold).float()
+        # cluster_mat[i, j] > threshold means token i and token j are in the same cluster
+        threshold_mask = (cluster_mat < self.threshold)
 
-        # With this mask, a token can only see its previous tokens
-        pre_mask = torch.tril(torch.ones(L, L), diagonal=-1).to(seqs.device)
-
-        # How to do cluster averaging?
-        # First, every token will be the average of the entire cluster
-        cluster_size = cluster_mat.sum(dim=2, keepdim=True)  # (B, L, 1)
+        # Step 1: Cluster Averaging, compute average for each row
+        # Filtered_cluster_mat here is the weights for each token in the cluster
+        # We use threshold because we do not want tokens that are not in this cluster to affect the average
+        # Which are low-confidence tokens
+        # We use -inf because later we will use softmax to get the weights
+        # We use softmax because we are computing weighted average and the sum of the weights should be 1
+        filtered_cluster_mat = torch.masked_fill(cluster_mat, threshold_mask, -torch.inf) # (B, L, L)
+        # We convert xyxy2xydl because xyxy can be (x1, y1, x2, y2) or (x2, y2, x1, y1)
+        # If we compute the average between this kind of opposite line segments, the result will be wrong
+        # So we convert it to xydl, which is (x_center, y_center, direction, length)
         xydl_seqs = xyxy2xydl(seqs)
-        cluster_means = cluster_mat @ xydl_seqs / cluster_size  # (B, L, D)
+        # Compute weighted average and convert back to xyxy
+        cluster_means = torch.softmax(filtered_cluster_mat, dim=-1) @ xydl_seqs
         cluster_means = xydl2xyxy(cluster_means)
 
-        # Then we need to check whether token i is the first token in the cluster
-        # cluster_mat * pre_mask will give the tokens in the cluster that are before token i
-        # If the sum if 0, then no token is before token i in the cluster
-        is_first_token = torch.sum(cluster_mat * pre_mask, dim=2, keepdim=True) == 0    # (B, L, 1)
+        # Step 2: Duplicate Removal, only keep the first token in the cluster
+        # lower[i, j] = 1 means token i and j are in the same cluster, and i is after j
+        lower = torch.tril(~threshold_mask, diagonal=-1)  # (B, L, L)
+        is_first_token = torch.sum(lower, dim=2, keepdim=True) == 0  # (B, L, 1)
+        cluster_means = cluster_means * is_first_token.float()
 
-        return cluster_means * is_first_token.float()
+        # Step 3: Zero removing, lots of elements are zeroed out during step 2
+        # Now we want to remove them
+        # That is, we only want Cluster of Interest (COI) means
+        # Index selecting only is_first_token == 1
+        coi_means = []
+        for b in range(B):
+            coi_means.append(cluster_means[b, is_first_token[b, :, 0]])
+
+        return cluster_means, coi_means
 
 
 class CrossDomainVAE(nn.Module):
@@ -135,9 +151,9 @@ class CrossDomainVAE(nn.Module):
         duplicate_segs = self.segs_head(x)
         cluster_mat = self.cluster_head(x)
 
-        unique_segs = self.drac(duplicate_segs, cluster_mat)
+        cluster_means, coi_means = self.drac(duplicate_segs, cluster_mat)
 
-        return duplicate_segs, cluster_mat, unique_segs
+        return duplicate_segs, cluster_mat, cluster_means, coi_means
 
     @staticmethod
     def reparameterize(z_mean, z_logvar):
@@ -150,5 +166,4 @@ class CrossDomainVAE(nn.Module):
     def forward(self, paths):
         z_mean, z_logvar = self.encode(paths)
         z = self.reparameterize(z_mean, z_logvar)
-        duplicate_segs, cluster_mat, unique_segs = self.decode(z)
-        return z_mean, z_logvar, duplicate_segs, cluster_mat, unique_segs
+        return z_mean, z_logvar, *self.decode(z)

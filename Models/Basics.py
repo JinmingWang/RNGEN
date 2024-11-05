@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as func
 from einops import rearrange
+from jaxtyping import Float, Bool
 from typing import List, Literal, Tuple
 from inspect import getfullargspec
 
