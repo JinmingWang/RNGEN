@@ -11,8 +11,7 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from  Diffusion import DDIM
-from Models import CrossDomainVAE, ClusterLoss, KLLoss, xyxy2xydl
+from Models import CrossDomainVAE, ClusterLoss, KLLoss
 
 
 def train():
@@ -103,7 +102,7 @@ def train():
             #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotTrajs(batch["Routes"][0], 0, 0, "Paths")
+            plot_manager.plotTrajs(batch["paths"][0], 0, 0, "Routes")
             plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs")
             plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs")
             plot_manager.plotSegments(batch["duplicate_segs"][0], 0, 3, "Duplicate Segs")

@@ -108,7 +108,7 @@ class PathsDiT(nn.Module):
             Rearrange("B (N L) D",  "B N L D", N=n_paths),
             nn.Linear(128, 32),
             Swish(),
-            nn.Linear(32, 2)
+            nn.Linear(32, 4)
         )
 
     def forward(self, x, context, t):

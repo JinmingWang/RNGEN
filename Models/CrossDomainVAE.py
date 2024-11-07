@@ -112,20 +112,22 @@ class CrossDomainVAE(nn.Module):
             Res1D(128, 256, 128),
 
             Rearrange("B D L", "B L D"),
-            AttentionBlock(self.N_segs, 128, 64, 256, 256, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
         )   # (B, D=128, L)
 
         self.segs_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            nn.Linear(256, 4),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            nn.Linear(128, 4),
         )
 
         self.cluster_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            nn.Linear(256, 128),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            nn.Linear(128, 128),
             Swish(),
             MultiHeadSelfRelationMatrix(128, 128, 16), # (B, L, L)
             nn.Sigmoid()

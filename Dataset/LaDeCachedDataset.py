@@ -28,7 +28,7 @@ class LaDeCachedDataset(Dataset):
         elif set_name == "test":
             slicing = slice(int(data_count * 0.8), None)
         elif set_name == "debug":
-            slicing = slice(100)
+            slicing = slice(300)
 
         self.trajs = self.trajs[slicing]
         self.paths = torch.load(folder_path + "/paths.pth")[slicing]
