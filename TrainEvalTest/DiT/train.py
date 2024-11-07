@@ -12,18 +12,18 @@ from torch.utils.data import DataLoader
 import os
 
 from Dataset import DEVICE, LaDeCachedDataset
-from Models import PathsDiT
+from Models import PathsDiT, CrossDomainVAE
 from Diffusion import DDIM
 
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
+    vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4, threshold=0.5).to(DEVICE)
+    vae.eval()
+
     DiT = PathsDiT(n_paths=N_TRAJS, l_path=L_PATH, d_context=2, n_layers=4, T=T).to(DEVICE)
 
-    torch.set_float32_matmul_precision('high')
-    DiT = torch.compile(DiT)
-
     # loadModels("Runs/SegmentsModel/20241029_021329_Use_Paths/last.pth", SegmentsModel=DiT, PathEncoder=traj_encoder)
-    return {"DiT": DiT}
+    return {"DiT": DiT, "VAE": vae}
 
 
 def train():
@@ -31,16 +31,16 @@ def train():
     dataset = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="train")
     dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
 
-    eval = getEvalFunction()
-
     # Models
     models = prepareModels()
+
+    eval = getEvalFunction(models["VAE"])
 
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1, data_dim=3)
     loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
-    optimizer = AdamW(models["DiT"].parameters(), lr=LR)
+    optimizer = AdamW(models["DiT"].parameters(), lr=LR, amsgrad=True)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
                                      min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
@@ -58,16 +58,19 @@ def train():
             for i, batch in enumerate(dataloader):
                 batch: Dict[str, Tensor]
 
-                noise = torch.randn_like(batch["paths"])
+                with torch.no_grad():
+                    latent, _ = models["VAE"].encode(batch["paths"])    # (B, N, L, 4)
+
+                latent_noise = torch.randn_like(latent)
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
-                noisy_x = ddim.diffusionForward(batch["paths"], t, noise)
+                latent_noisy = ddim.diffusionForward(latent, t, latent_noise)
 
                 optimizer.zero_grad()
 
-                pred = models["DiT"](noisy_x, batch["trajs"], t)
+                latent_pred = models["DiT"](latent_noisy, batch["trajs"], t)
 
-                loss = loss_func(pred, noise)
+                loss = loss_func(latent_pred, latent)
 
                 loss.backward()
 

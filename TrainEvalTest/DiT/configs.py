@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "Initial"
+COMMENT = "T-R-S_LDM"
 
 # Training Parameters
 LR = 2e-4

@@ -89,8 +89,10 @@ class PathsDiT(nn.Module):
             Swish(),
             Conv1dBnAct(32, 64, 3, 2, 1),
             Res1D(64, 128, 64),
+            Res1D(64, 128, 64),
 
             Conv1dBnAct(64, 128, 3, 2, 1),
+            Res1D(128, 256, 128),
             Res1D(128, 256, 128),
             Rearrange("(B N) D L", "B N L D", N=n_paths)
         )
