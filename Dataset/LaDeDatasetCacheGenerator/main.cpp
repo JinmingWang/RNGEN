@@ -17,17 +17,15 @@
 int data_count = 10;
 std::string path = "/home/jimmy/Data/LaDe/processed_roads_Shanghai.pt";
 int graph_depth = 5;
-int trajs_per_graph = 64;
+int N_trajs = 64;
 int max_segs_per_graph = 64;
-bool rotation = true;
-float scaling_range = 0.2;
 float traj_step_mean = 0.3;
 float traj_step_std = 0.15;
 float traj_noise_std = 0.07;
-float traj_len = 64;
 
-void saveTensors(vector<Tensor> tensor, std::string path) {
-    std::vector<char> f = torch::pickle_save(tensor);
+template <typename T>
+void saveTensors(T tensors, std::string path) {
+    std::vector<char> f = torch::pickle_save(tensors);
     std::ofstream out(path, std::ios::out | std::ios::binary);
     out.write(f.data(), f.size());
     out.close();
@@ -59,14 +57,12 @@ void parseConfigFile(const std::string& filename) {
     data_count = std::stoi(configMap.at("data_count"));
     path = configMap.at("path");
     graph_depth = std::stoi(configMap.at("graph_depth"));
-    trajs_per_graph = std::stoi(configMap.at("trajs_per_graph"));
+    N_trajs = std::stoi(configMap.at("N_trajs"));
     max_segs_per_graph = std::stoi(configMap.at("max_segs_per_graph"));
-    rotation = configMap.at("rotation") == "true";
     scaling_range = std::stof(configMap.at("scaling_range"));
     traj_step_mean = std::stof(configMap.at("traj_step_mean"));
     traj_step_std = std::stof(configMap.at("traj_step_std"));
     traj_noise_std = std::stof(configMap.at("traj_noise_std"));
-    traj_len = std::stoi(configMap.at("traj_len"));
 }
 
 
@@ -86,28 +82,25 @@ int main(int argc, char const *argv[]) {
     int count_w = std::to_string(data_count).length();
 
     // Easy
-    LaDeDataset dataset(path, graph_depth, trajs_per_graph, max_segs_per_graph, rotation,
-                        scaling_range, traj_step_mean, traj_step_std, traj_noise_std, traj_len);
-    vector<Tensor> trajs;
-    vector<Tensor> paths;
-    vector<Tensor> trajs_lengths;
-    vector<Tensor> paths_lengths;
-    vector<Tensor> graphs;
-    vector<Tensor> graphs_segs;
-    vector<Tensor> heatmaps;
+    LaDeDataset dataset(path, graph_depth, N_trajs, max_segs_per_graph,
+                        traj_step_mean, traj_step_std, traj_noise_std);
+    vector<vector<Tensor>> all_trajs;
+    vector<vector<Tensor>> all_paths;
+    vector<Tensor> all_segs;
+    //vector<Tensor> heatmaps;
 
     // record start time
     clock_t start = clock();
 
     for (int i = 0; i < data_count; i++) {
-        map<string, Tensor> data = dataset.get();
-        trajs.emplace_back(data["trajs"].to(torch::kCPU));
-        paths.emplace_back(data["paths"].to(torch::kCPU));
-        trajs_lengths.emplace_back(data["traj_lengths"].to(torch::kCPU));
-        paths_lengths.emplace_back(data["path_lengths"].to(torch::kCPU));
-        graphs_segs.emplace_back(data["num_segments"].to(torch::kCPU));
-        graphs.emplace_back(data["graph"].to(torch::kCPU));
-        heatmaps.emplace_back(data["heatmap"].to(torch::kCPU));
+        vector<Tensor> trajs;   // (N_trajs, L_traj, 2)
+        vector<Tensor> paths;   // (N_trajs, L_path, 2)
+        Tensor segs;    // (N_segs, 8, 2)
+        dataset.get(segs, trajs, paths);
+
+        all_trajs.emplace_back(trajs.to(torch::kCPU));
+        all_paths.emplace_back(paths.to(torch::kCPU));
+        all_segs.emplace_back(segs.to(torch::kCPU));
 
         double elapsed = double(clock() - start) / CLOCKS_PER_SEC;
         double estimated_total = elapsed / (i + 1) * data_count;
@@ -119,13 +112,10 @@ int main(int argc, char const *argv[]) {
     }
     std::cout << std::endl;
 
-    saveTensors(trajs, "./CACHE/trajs.pth");          // Each element: (64, 128, 2)
-    saveTensors(paths, "./CACHE/paths.pth");          // Each element: (64, 11, 2)
-    saveTensors(trajs_lengths, "./CACHE/trajs_lengths.pth");  // Each element: (64)
-    saveTensors(paths_lengths, "./CACHE/paths_lengths.pth");  // Each element: (64)
-    saveTensors(graphs_segs, "./CACHE/segs_count.pth");  // Each element: (64)
-    saveTensors(graphs, "./CACHE/graphs.pth");        // Each element: (64, 2, 2)
-    saveTensors(heatmaps, "./CACHE/heatmaps.pth");    // Each element: (2, 64, 64)
+    saveTensors<vector<vector<Tensor>>>(all_trajs, "./CACHE/trajs.pth");
+    saveTensors<vector<vector<Tensor>>>(all_paths, "./CACHE/paths.pth");
+    saveTensors<vector<Tensor>>(all_segs, "./CACHE/segs.pth");
+    // saveTensors(heatmaps, "./CACHE/heatmaps.pth");    // Each element: (2, 64, 64)
     
     return 0;
 }

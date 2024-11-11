@@ -4,38 +4,34 @@ class LaDeDataset {
 public:
     LaDeDataset(std::string path,
                 int graph_depth = 5, 
-                int trajs_per_graph = 64,
+                int N_trajs = 64,
                 int max_segs_per_graph = 64,
-                bool rotation = true, 
-                float scaling_range = 0.2, 
                 float traj_step_mean = 0.1,
                 float traj_step_std = 0.03,
-                float traj_noise_std = 0.03,
-                int traj_len = 128);
+                float traj_noise_std = 0.03);
 
-    map<string, Tensor> get();
+    void get(Tensor &graph, vector<Tensor> &trajs, vector<Tensor> &paths);
 
 private:
 
     Tensor nodes;
     Tensor edges;
     Tensor degrees;
+    Tensor keynode_mask;
     int graph_depth;
-    int trajs_per_graph;
+    int N_trajs;
     int max_segs_per_graph;
-    bool rotation;
-    float scaling_range;
     float traj_step_mean;
     float traj_step_std;
     float traj_noise_std;
-    int traj_len;
 
     Tensor candidate_nodes;
 
     SegmentGraph getGraph();
     void removeBadNodes();
-    void simulateTrajs(SegmentGraph &graph, Tensor &trajs, Tensor &paths, Tensor &traj_lengths, Tensor &path_lengths);
-    void simulateTraj(Tensor visiting_nodes, Tensor &traj, int &num_points);
-    Tensor getHeatmap(Tensor graph_tensor, Tensor traj_tensor, int H, int W);
+    void simulateTrajs(SegmentGraph &graph, vector<Tensor> &trajs, vector<Tensor> &paths);
+    Tensor simulateTraj(Tensor visiting_nodes);
+    Tensor getHeatmap(Tensor graph_tensor, vector<Tensor> traj_tensor, int H, int W);
+    void computeKeyNodeMask();
 };
     
