@@ -20,8 +20,8 @@ int graph_depth = 5;
 int N_trajs = 64;
 int max_segs_per_graph = 64;
 float traj_step_mean = 0.3;
-float traj_step_std = 0.15;
 float traj_noise_std = 0.07;
+int L_traj = 64;
 
 template <typename T>
 void saveTensors(T tensors, std::string path) {
@@ -59,10 +59,9 @@ void parseConfigFile(const std::string& filename) {
     graph_depth = std::stoi(configMap.at("graph_depth"));
     N_trajs = std::stoi(configMap.at("N_trajs"));
     max_segs_per_graph = std::stoi(configMap.at("max_segs_per_graph"));
-    scaling_range = std::stof(configMap.at("scaling_range"));
     traj_step_mean = std::stof(configMap.at("traj_step_mean"));
-    traj_step_std = std::stof(configMap.at("traj_step_std"));
     traj_noise_std = std::stof(configMap.at("traj_noise_std"));
+    L_traj = std::stoi(configMap.at("L_traj"));
 }
 
 
@@ -82,8 +81,8 @@ int main(int argc, char const *argv[]) {
     int count_w = std::to_string(data_count).length();
 
     // Easy
-    LaDeDataset dataset(path, graph_depth, N_trajs, max_segs_per_graph,
-                        traj_step_mean, traj_step_std, traj_noise_std);
+    LaDeDataset dataset(path, graph_depth, N_trajs, L_traj, max_segs_per_graph,
+                        traj_step_mean, traj_noise_std);
     vector<vector<Tensor>> all_trajs;
     vector<vector<Tensor>> all_paths;
     vector<Tensor> all_segs;
@@ -98,9 +97,9 @@ int main(int argc, char const *argv[]) {
         Tensor segs;    // (N_segs, 8, 2)
         dataset.get(segs, trajs, paths);
 
-        all_trajs.emplace_back(trajs.to(torch::kCPU));
-        all_paths.emplace_back(paths.to(torch::kCPU));
-        all_segs.emplace_back(segs.to(torch::kCPU));
+        all_trajs.emplace_back(trajs);
+        all_paths.emplace_back(paths);
+        all_segs.emplace_back(segs);
 
         double elapsed = double(clock() - start) / CLOCKS_PER_SEC;
         double estimated_total = elapsed / (i + 1) * data_count;

@@ -4,13 +4,13 @@ class SegmentGraph {
 public:
     Tensor segments;
     int min_path_length = 2;
-    int max_path_length = 8;
+    int max_path_length = 32;
 
     SegmentGraph();
     SegmentGraph(std::vector<Tensor> segment_list);
     SegmentGraph(Tensor segments);
 
-    Tensor getRandomNeighbour(Tensor node);
+    int getRandomNeighbour(Tensor node, int this_sid);
     Tensor getRandomPath();
     Tensor getCenter();
     void normalize();
@@ -19,5 +19,5 @@ public:
 
 private:
 
-    std::vector<Tensor> growPath(std::vector<Tensor> path);
+    Tensor growPath(Tensor path, int this_sid);
 };

@@ -15,10 +15,10 @@ std::vector<char> getBytes(std::string filename) {
 LaDeDataset::LaDeDataset(std::string path, 
                          int graph_depth, 
                          int N_trajs,
+                         int max_L_traj,
                          int max_segs_per_graph,
-                         float traj_step_mean, 
-                         float traj_step_std, 
-                         float traj_noise_std, ) {
+                         float traj_step_mean,
+                         float traj_noise_std) {
 
     torch::IValue x = torch::pickle_load(getBytes(path));
     auto generic_list = x.toList();
@@ -33,9 +33,9 @@ LaDeDataset::LaDeDataset(std::string path,
 
     this->graph_depth = graph_depth;
     this->N_trajs = N_trajs;
+    this->max_L_traj = max_L_traj;
     this->max_segs_per_graph = max_segs_per_graph;
     this->traj_step_mean = traj_step_mean;
-    this->traj_step_std = traj_step_std;
     this->traj_noise_std = traj_noise_std;
 
     this->candidate_nodes = torch::where(this->degrees > 2)[0];
@@ -119,7 +119,13 @@ void LaDeDataset::removeBadNodes() {
 void LaDeDataset::get(Tensor &segments, vector<Tensor> &trajs, vector<Tensor> &paths) {
     SegmentGraph graph = this->getGraph();  // graph.segments: (N_segs, 8, 2)
     this->simulateTrajs(graph, trajs, paths);
-    segments = graph.segments;
+
+    for (int i = 0; i < this->N_trajs; i ++){
+        trajs[i] = trajs[i].to(torch::kCPU);
+        paths[i] = paths[i].to(torch::kCPU);
+    }
+
+    segments = graph.segments.to(torch::kCPU);
 }
 
 
@@ -130,8 +136,8 @@ SegmentGraph LaDeDataset::getGraph() {
 
     // keep track of the edges that have been visited
     std::set<std::set<int>> visited_edges;
-    // A hyper_segment is a path connecting two key nodes
-    std::set<std::vector<int>> hyper_segments;
+    // A hyper_seg is a path connecting two key nodes
+    std::set<std::vector<int>> hyper_segs;
     // frontier is used to keep track of the key nodes that are being visited
     std::set<int> frontier({node_idx});
     int depth = 0;
@@ -147,65 +153,64 @@ SegmentGraph LaDeDataset::getGraph() {
                 std::set<int> edge({node_id, reaching_node_id});
                 if (visited_edges.find(edge) != visited_edges.end()) continue;
 
-                // This edge has not been visited, which also means this hyper_segment has not been visited
-                std::vector<int> hyper_segment = {node_id, reaching_node_id};
+                // This edge has not been visited, which also means this hyper_seg has not been visited
+                std::vector<int> hyper_seg = {node_id, reaching_node_id};
                 visited_edges.insert(edge);
 
                 // Reach out to another key node
                 while (! this->keynode_mask[reaching_node_id].item<bool>()) {
-                    // The reaching node is not a key node, step one step further
+                    // The reaching node is not a key node, go one step further
                     // The reaching node must have two neighbors
                     // One is the way we come from, the other is the way we go
-                    if (this->edges[reaching_node_id][0].item<int>() == hyper_segment[hyper_segment.size() - 2]) {
+                    if (this->edges[reaching_node_id][0].item<int>() == hyper_seg[hyper_seg.size() - 2]) {
                         // Then edges[reaching_node_id][0] is the way we come from, reach for edges[reaching_node_id][1]
-                        hyper_segment.push_back(this->edges[reaching_node_id][1].item<int>());
+                        hyper_seg.push_back(this->edges[reaching_node_id][1].item<int>());
                     } else {
-                        hyper_segment.push_back(this->edges[reaching_node_id][0].item<int>());
+                        hyper_seg.push_back(this->edges[reaching_node_id][0].item<int>());
                     }
                     // Update the reaching node
-                    reaching_node_id = hyper_segment[hyper_segment.size() - 1];
+                    reaching_node_id = hyper_seg[hyper_seg.size() - 1];
                     // Update the edge
-                    edge = {hyper_segment[hyper_segment.size() - 2], hyper_segment[hyper_segment.size() - 1]};
+                    edge = {hyper_seg[hyper_seg.size() - 2], hyper_seg[hyper_seg.size() - 1]};
                     visited_edges.insert(edge);
                 }
 
-                // hyper_segments could be too long, we need to truncate it
+                // hyper_seg could be too long, we need to truncate it
                 bool too_long = false;
-                while (hyper_segments.size() > this->graph_depth) {
+                while (hyper_seg.size() > this->seg_interp_len) {
                     too_long = true;
-                    hyper_segment.pop_back();
+                    hyper_seg.pop_back();
                 }
 
-                // Now hyper_segments = [node_id, ..., reaching_node_id]
-                hyper_segments.push_back(hyper_segment);
+                // Now hyper_segs = [node_id, ..., reaching_node_id]
+                hyper_segs.insert(hyper_seg);
                 // Add the reaching node to the new frontier if it is a key node
                 // too_long is True, then the reaching node is not a key node
                 if (! too_long) frontier.insert(reaching_node_id);
 
-                if (hyper_segments.size() == this->max_segs_per_graph) break;
+                if (hyper_segs.size() == this->max_segs_per_graph) break;
             }
-            if (hyper_segments.size() == this->max_segs_per_graph) break;
+            if (hyper_segs.size() == this->max_segs_per_graph) break;
         }
-        if (hyper_segments.size() == this->max_segs_per_graph) break;
+        if (hyper_segs.size() == this->max_segs_per_graph) break;
         frontier = new_frontier;
         depth++;
     }
 
-    std::vector<Tensor> hyper_segments_tensor;
-    int n_interp = 8;
-    for (auto &hyper_seg : hyper_segments) {
+    std::vector<Tensor> hyper_segs_tensor;
+    for (auto &hyper_seg : hyper_segs) {
         std::vector<Tensor> node_arr;
         for (auto &node_id : hyper_seg) {
-            nodes.emplace_back(this->nodes[node_id]);
+            node_arr.emplace_back(this->nodes[node_id]);
         }
         Tensor nodes = torch::stack(node_arr, 0);   // (N, 2)
 
-        // Do interpolation to make the hyper_segment longer
-        Tensor pairwise_dist = torch::norm(hyper_segment_tensor.index({Slice(1, None)} - hyper_segment_tensor.index({Slice(None, -1)}), 2, 1);
+        // Do interpolation to make the hyper_seg longer
+        Tensor pairwise_dist = torch::norm(nodes.index({Slice(1, None)}) - nodes.index({Slice(None, -1)}), 2, 1);
         Tensor reach_dist = torch::nn::functional::pad(torch::cumsum(pairwise_dist, 0), torch::nn::functional::PadFuncOptions({1, 0}));
 
         // t is where the point is on the path
-        Tensor t = torch::linspace(0, reach_dist[-1].item<float>(), n_interp).to(DEVICE);
+        Tensor t = torch::linspace(0, reach_dist[-1].item<float>(), this->seg_interp_len).to(DEVICE);
 
         // For i-th interpolation point, find the left and right nodes
         Tensor right_ids = torch::searchsorted(reach_dist, t);  // Is there a right=True parameter?
@@ -216,35 +221,36 @@ SegmentGraph LaDeDataset::getGraph() {
         Tensor right_ratio = 1 - left_ratio;
 
         Tensor interp_points = nodes.index({left_ids}) * right_ratio.unsqueeze(1) + nodes.index({right_ids}) * left_ratio.unsqueeze(1);
-        hyper_segments_tensor.emplace_back(interp_points);
+        hyper_segs_tensor.emplace_back(interp_points);
     }
-    return SegmentGraph(hyper_segments_tensor);
+    return SegmentGraph(hyper_segs_tensor);
 }
 
 void LaDeDataset::simulateTrajs(SegmentGraph &graph, vector<Tensor> &trajs, vector<Tensor> &paths) {
     for (int i = 0; i < this->N_trajs; i++) {
         Tensor path = graph.getRandomPath();
         paths.emplace_back(path);
-        trajs.emplace_back(simulateTraj(path);
+        trajs.emplace_back(simulateTraj(path));
     }
 }
 
-Tensor LaDeDataset::simulateTraj(Tensor visiting_nodes) {
-    // visiting_node: (N, 2)
+Tensor LaDeDataset::simulateTraj(Tensor path) {
+    // path: (N, 2)
     // pairwise_dist: (N-1,)
-    Tensor exclude_first = visiting_nodes.index({Slice(1, None, 1)});
-    Tensor exclude_last = visiting_nodes.index({Slice(None, -1, 1)});
+    Tensor exclude_first = path.index({Slice(1, None, 1)});
+    Tensor exclude_last = path.index({Slice(None, -1, 1)});
 
     Tensor pairwise_dist = torch::norm(exclude_first - exclude_last, 2, 1);
     Tensor distances = torch::cumsum(pairwise_dist, 0);
     distances = torch::cat({torch::zeros({1}, DEVICE), distances}, 0);
 
-    num_points = (int) (distances[-1] / this->traj_step_mean + torch::randn({1}, DEVICE)).item<float>();
+    int num_points = (int) (distances[-1] / this->traj_step_mean + torch::randn({1}, DEVICE)).item<float>();
     if (num_points < 3) num_points = 3;
-    if (num_points > this->traj_len) num_points = this->traj_len;
+    if (num_points > this->max_L_traj) num_points = this->max_L_traj;
     // t is where the point is on the path
-    Tensor t = torch::linspace(0, distances[-1].item<float>(), num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_step_std;
-    t = torch::nn::functional::hardtanh(t, torch::nn::HardtanhOptions().min_val(0.01).max_val(distances[-1].item<float>() - 0.01));
+    // Tensor t = torch::linspace(0, distances[-1].item<float>(), num_points).to(DEVICE) + torch::randn({num_points}, DEVICE) * this->traj_step_std;
+    // t = torch::nn::functional::hardtanh(t, torch::nn::HardtanhOptions().min_val(0.0).max_val(distances[-1].item<float>()));
+    Tensor t = torch::rand({num_points}).to(DEVICE) * distances[-1].item<float>();
     // t must be sorted because noise adding may change the order
     t = std::get<0>(torch::sort(t));
 
@@ -269,18 +275,19 @@ Tensor LaDeDataset::simulateTraj(Tensor visiting_nodes) {
     ::std::optional<c10::string_view> side = ::std::nullopt,
     const ::std::optional<at::Tensor> &sorter = {})
     */
-    Tensor right_ids = torch::searchsorted(distances, t);
+    Tensor right_ids = torch::searchsorted(distances, t, true, true);
     Tensor left_ids = right_ids - 1;
     Tensor left_ratio = (t - distances.index({left_ids})) / pairwise_dist.index({left_ids});
     Tensor right_ratio = 1 - left_ratio;
-    Tensor traj = visiting_nodes.index({left_ids}) * right_ratio.unsqueeze(1) + visiting_nodes.index({right_ids}) * left_ratio.unsqueeze(1);
+    Tensor traj = path.index({left_ids}) * right_ratio.unsqueeze(1) + path.index({right_ids}) * left_ratio.unsqueeze(1);
 
-    Tensor gps_noise = torch::randn_like(traj_tensor) * this->traj_noise_std;
+    Tensor gps_noise = torch::randn_like(traj) * this->traj_noise_std;
 
     return traj + gps_noise;
 }
 
-Tensor LaDeDataset::getHeatmap(Tensor graph_tensor, Tensor traj_tensor, int H, int W) {
+/*
+Tensor LaDeDataset::getHeatmap(Tensor graph_tensor, vector<Tensor> traj_tensor, int H, int W) {
     // eliminate duplicate nodes
     Tensor nodes = std::get<0>(torch::unique_dim(graph_tensor.view({-1, 2}), 0));
 
@@ -308,6 +315,7 @@ Tensor LaDeDataset::getHeatmap(Tensor graph_tensor, Tensor traj_tensor, int H, i
 
     return torch::stack({heatmap_flat, nodemap_flat}, 0).view({2, H, W});
 }
+*/
 
 void LaDeDataset::computeKeyNodeMask(){
     auto whole_dim = Slice();
@@ -315,14 +323,14 @@ void LaDeDataset::computeKeyNodeMask(){
     Tensor left_id = this->edges.index({whole_dim, 0});
     Tensor l_node = this->nodes.index({left_id});
 
-    Tensor right_id = this->edge.index({whole_dim, 1});
+    Tensor right_id = this->edges.index({whole_dim, 1});
     Tensor r_node = this->nodes.index({right_id});
 
     Tensor BA = l_node - this->nodes;
     Tensor BC = r_node - this->nodes;
 
-    Tensor angle_rad = torch::atan2(BC.index{whole_dim, 1}, BC.index{whole_dim, 0}) - torch::atan2(BA.index{whole_dim, 1}, BA.index{whole_dim, 0});
-    Tensor angle_deg = torch::abs(angle_red * 180 / 3.14159265359);
+    Tensor angle_rad = torch::atan2(BC.index({whole_dim, 1}), BC.index({whole_dim, 0})) - torch::atan2(BA.index({whole_dim, 1}), BA.index({whole_dim, 0}));
+    Tensor angle_deg = torch::abs(angle_rad * 180 / 3.14159265359);
     angle_deg = torch::min(angle_deg, 360.0 - angle_deg);
 
     Tensor less_than_90 = angle_deg < 90;

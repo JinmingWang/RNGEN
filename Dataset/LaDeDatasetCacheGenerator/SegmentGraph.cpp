@@ -13,9 +13,11 @@ SegmentGraph::SegmentGraph(Tensor segments) {
     this->segments = segments;
 }
 
-Tensor SegmentGraph::getRandomNeighbour(Tensor node) {
+int SegmentGraph::getRandomNeighbour(Tensor node, int this_sid) {
+    // node: (2)
     std::vector<int> neighbors;
     for (int i = 0; i < this->segments.size(0); i++) {
+        if (i == this_sid) continue;
         // first node of the segment == node, this segment is a neighbor
         if (this->segments[i][0].equal(node)) neighbors.emplace_back(i);
         // last node of the segment == node, this segment is a neighbor
@@ -23,44 +25,60 @@ Tensor SegmentGraph::getRandomNeighbour(Tensor node) {
     }
 
     if (neighbors.size() == 0) {
-        return torch::empty({0, 2}).to(DEVICE);
+        return -1;
     } else {
-        int neighbor_id = neighbors[rand() % neighbors.size()];
-        return this->segments[neighbor_id];
+        return neighbors[rand() % neighbors.size()];
     }
 }
 
 Tensor SegmentGraph::getRandomPath() {
-    int num_segs = this->segments.size(0);
-    int start_sid = rand() % num_segs;
-    return this->growPath(this->segments[start_sid]);
+    int start_sid = rand() % this->segments.size(0);
+    return this->growPath(this->segments[start_sid], start_sid);
 }
 
-Tensor SegmentGraph::growPath(Tensor path) {
-    Tensor left_neighbor = this->getNeighbors(path[0]);
-    if (left_neighbor.size(0) > 0) {
+Tensor SegmentGraph::growPath(Tensor path, int this_sid) {
+    int left_neighbor_id = this->getRandomNeighbour(path[0], this_sid);
+    int right_neighbor_id = this->getRandomNeighbour(path[-1], this_sid);
+
+    if (path.size(0) >= this->max_path_length) {
+        return path;
+    }
+
+    // Cannot grow anymore
+    if (left_neighbor_id == -1 && right_neighbor_id == -1){
+        return path;
+    }
+
+    bool grow_left;
+    if (left_neighbor_id == -1) {   // cannot grow left, then grow right
+        grow_left = false;
+    } else if (right_neighbor_id == -1) {   // cannot grow right, then grow left
+        grow_left = true;
+    } else {    // can grow both side, randomly choose one
+        auto gen = std::bind(std::uniform_int_distribution<>(0,1),std::default_random_engine());
+        grow_left = gen();
+    }
+
+    if (grow_left) {
+        Tensor left_neighbor = this->segments[left_neighbor_id];
         if (left_neighbor[0].equal(path[0])) {
             // have to flip left_neighbor then concatenate
             path = torch::cat({left_neighbor.flip(0), path}, 0);
         } else {
             path = torch::cat({left_neighbor, path}, 0);
         }
-    }
-
-    Tensor right_neighbor = this->getNeighbors(path[-1]);
-    if (right_neighbor.size(0) > 0) {
+        this->growPath(path, left_neighbor_id);
+    } else {
+        Tensor right_neighbor = this->segments[right_neighbor_id];
         if (right_neighbor[0].equal(path[-1])) {
             path = torch::cat({path, right_neighbor}, 0);
         } else {
             path = torch::cat({path, right_neighbor.flip(0)}, 0);
         }
+        this->growPath(path, right_neighbor_id);
     }
 
-    if ((left_neighbors.size() > 0 || right_neighbors.size() > 0) && path.size() < this->max_path_length) {
-        return this->growPath(visited_sid, path);
-    } else {
-        return path;
-    }
+    return path;
 }
 
 Tensor SegmentGraph::getCenter() {

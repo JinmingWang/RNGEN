@@ -1,9 +1,8 @@
-data_count=20000
-path=/home/jimmy/Data/LaDe/processed_roads_Shanghai.pt
-graph_depth=4
+data_count=10000
+path=/home/jimmy/Desktop/RNGEN/Dataset/RoadsGetter/Jilin_City_street_network.pt
+graph_depth=5
 N_trajs=64
 max_segs_per_graph=64
-traj_step_mean=0.2
-traj_step_std=0.1
-traj_noise_std=0.01
-traj_len=64
+traj_step_mean=0.00001
+traj_noise_std=0.00001
+L_traj=64

@@ -17,6 +17,6 @@ for city in cities:
     degrees = torch.tensor(degrees, dtype=torch.int64, device="cuda")
 
     io_stream = io.BytesIO()
-    torch.save((nodes, edges, degrees), io_stream, _use_new_zipfile_serialization=True)
+    torch.save([nodes, edges, degrees], io_stream, _use_new_zipfile_serialization=True)
     with open(f"{city}_street_network.pt", "wb") as f:
         f.write(io_stream.getbuffer())
