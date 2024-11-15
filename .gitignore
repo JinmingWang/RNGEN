@@ -163,4 +163,7 @@ cython_debug/
 
 Runs/
 
+*.pt
 *.pth
+*.graphml
+*.npy
