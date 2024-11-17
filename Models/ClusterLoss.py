@@ -9,8 +9,7 @@ class ClusterLoss(nn.Module):
         # target_seq: (B, N, D)
         # Two tokens are in the same cluster if they are the same
         # so, generate a (B, N, N) matrix where cluster_mat[i, j] = 1 if target_seq[i] == target_seq[j]
-        target_xydl = xyxy2xydl(target_seq)
-        dist_mat = torch.cdist(target_xydl, target_xydl, 2)
+        dist_mat = torch.cdist(target_seq, target_seq, 2)
         cluster_mat = (dist_mat < 1e-3).float()
         return cluster_mat
 
@@ -23,7 +22,7 @@ class ClusterLoss(nn.Module):
         # Step 1. find the matching between input_seq and target_seq
         # pred_seq: (x1, y1, x2, y2)
         # pred_seqp: (x2, y2, x1, y1)
-        pred_swap = pred_seq[..., [2, 3, 0, 1]]
+        pred_swap = pred_seq.flip(-1)
         cost_matrices_A = torch.cdist(pred_seq, target_seq, p=2)  # (B, M, N)
         cost_matrices_B = torch.cdist(pred_swap, target_seq, p=2)    # (B, M, N)
         cost_matrices = torch.min(cost_matrices_A, cost_matrices_B).detach().cpu().numpy()  # (B, M, N)

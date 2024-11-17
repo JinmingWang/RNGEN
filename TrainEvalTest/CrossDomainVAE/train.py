@@ -2,33 +2,31 @@ from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.CrossDomainVAE.configs import *
 from TrainEvalTest.Utils import *
 
+from einops import rearrange
+
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
 
 import os
 
-from Dataset import DEVICE, LaDeCachedDataset
+from Dataset import DEVICE, RoadNetworkDataset
 from Models import CrossDomainVAE, ClusterLoss, KLLoss
 
 
 def train():
     # Dataset & DataLoader
-    dataset = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="train")
-    dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
+    dataset = RoadNetworkDataset("Dataset/RoadsGetter",
+                                 batch_size=batch_size,
+                                 drop_last=False,
+                                 set_name="debug",
+                                 enable_aug=True,
+                                 img_H=256,
+                                 img_W=256
+                                 )
 
-    # Models
-    # DiT = PathsDiT(n_paths=N_TRAJS, l_path=L_PATH, d_context=2, n_layers=4, T=T).to(DEVICE)
-    # ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1, data_dim=3)
-    # loadModels("Runs/PathsDiT/241030_0853_Initial/last.pth", DiT=DiT)
-    # DiT.eval()
-
-    vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4, threshold=0.5).to(DEVICE)
-
-    # torch.set_float32_matmul_precision("high")
-    # vae = torch.compile(vae)
+    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
 
     cluster_loss_func = ClusterLoss()
     rec_loss_func = torch.nn.MSELoss()
@@ -43,35 +41,35 @@ def train():
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR, exist_ok=True)
     writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_cll = MovingAvg(MOV_AVG_LEN * len(dataloader))
-    mov_avg_kll = MovingAvg(MOV_AVG_LEN * len(dataloader))
-    mov_avg_rec = MovingAvg(MOV_AVG_LEN * len(dataloader))
+    mov_avg_cll = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_kll = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_rec = MovingAvg(MOV_AVG_LEN * len(dataset))
     global_step = 0
     best_loss = float("inf")
     plot_manager = PlotManager(5, 1, 5)
 
-    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["CLL", "KLL", "REC", "lr"]) as progress:
+    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["CLL", "KLL", "REC", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
-            for i, batch in enumerate(dataloader):
+            for i, batch in enumerate(dataset):
                 batch: Dict[str, torch.Tensor]
-
-                # batch |= LaDeCachedDataset.getJointsFromSegments(batch["segs"])
-
-                # noise = torch.randn_like(batch["paths"])
-                # pred_func = lambda noisy_contents, t: [DiT(*noisy_contents, batch["trajs"], t)]
-                # pred_paths = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
                 optimizer.zero_grad()
+                B = batch["routes"].shape[0]
 
-                batch["duplicate_segs"] = torch.cat([batch["paths"][..., 1:, :], batch["paths"][..., :-1, :]], dim=-1)  # (B, N, L-1, 4)
-                batch["duplicate_segs"] = batch["duplicate_segs"].view(B, -1, 4).contiguous()  # (B, N_segs, 4)
+                # Every 8 points are put together to form a segment
+                # However, there should be 1 overlapping point between adjacent segments
+                # routes: (B, N, L, 2)
+                batch["duplicate_segs"] = RoadNetworkDataset.sequencesToSegments(batch["routes"], dataset.N_interp)
+                # (B, N_trajs, N_segs, L_seg * 2)
+
+                # batch["duplicate_segs"] = batch["duplicate_segs"].view(B, -1, dataset.N_interp, 2).contiguous()
                 filter_mask = ~torch.any(batch["duplicate_segs"] == 0, dim=2, keepdim=True)
                 batch["duplicate_segs"] = batch["duplicate_segs"] * filter_mask
 
-                z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["paths"])
+                z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["routes"])
                 kll = kl_loss_func(z_mean, z_logvar)
                 rec = rec_loss_func(duplicate_segs, batch["duplicate_segs"])
-                cll = cluster_loss_func(duplicate_segs.detach(), cluster_mat, batch["segs"][..., :-1])
+                cll = cluster_loss_func(duplicate_segs.detach().view(B, -1, dataset.N_interp*2), cluster_mat, batch["segs"].flatten(-2, -1))
                 loss = kll + cll + rec
 
                 # Backpropagation
@@ -102,11 +100,11 @@ def train():
             #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotTrajs(batch["paths"][0], 0, 0, "Routes")
-            plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs")
-            plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs")
-            plot_manager.plotSegments(batch["duplicate_segs"][0], 0, 3, "Duplicate Segs")
-            plot_manager.plotSegments(duplicate_segs[0], 0, 4, "Pred Duplicate Segs")
+            plot_manager.plotTrajs(batch["routes"][0], 0, 0, "Routes")
+            plot_manager.plotSegments(batch["segs"][0].view(-1, 2), 0, 1, "Segs")
+            plot_manager.plotSegments(coi_means[0].view(-1, 2), 0, 2, "Pred Segs")
+            plot_manager.plotSegments(batch["duplicate_segs"][0].view(-1, 2), 0, 3, "Duplicate Segs")
+            plot_manager.plotSegments(duplicate_segs[0].view(-1, 2), 0, 4, "Pred Duplicate Segs")
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 

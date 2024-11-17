@@ -1,16 +1,19 @@
 # LaDe Dataset: https://arxiv.org/abs/2306.10675
 import torch
-from torch.utils.data import Dataset
 from .Utils import *
-from random import choice
+from tqdm import tqdm
 import os
 
 
-class RoadNetworkDataset(Dataset):
+class RoadNetworkDataset():
     def __init__(self,
                  folder_path: str,
-                 max_trajs: int = 32,
-                 set_name: str = "train") -> None:
+                 batch_size: int = 32,
+                 drop_last: bool = True,
+                 set_name: str = "train",
+                 enable_aug: bool = False,
+                 img_H: int = 256,
+                 img_W: int = 256) -> None:
         """
         Initialize the dataset, this class loads data from a cache file
         The cache file is created by using LaDeDatasetCacheGenerator class
@@ -18,43 +21,98 @@ class RoadNetworkDataset(Dataset):
         :param max_trajs: the maximum number of trajectories to use
         :param set_name: the name of the set, either "train" or "test"
         """
-        self.max_trajs = max_trajs
+        self.batch_size = batch_size
+        self.drop_last = drop_last
         self.set_name = set_name
+        self.enable_aug = enable_aug
+        self.img_H = img_H
+        self.img_W = img_W
 
-        self.trajs = torch.load(folder_path + "/trajs.pth")
+        # (N_data, N_trajs, L_traj, 2)
+        self.trajs = torch.load(os.path.join(folder_path, "trajs.pt"))
         data_count = len(self.trajs)
         if set_name == "train":
             slicing = slice(int(data_count * 0.9))
-            self.enable_aug = True
         elif set_name == "test":
             slicing = slice(int(data_count * 0.1), None)
-            self.enable_aug = False
         elif set_name == "debug":
             slicing = slice(300)
-            self.enable_aug = True
 
-        # (N_data, N_trajs, L_traj, 2)
-        self.trajs = torch.load(os.path.join(folder_path, "paths.pth"))[slicing]
+        # Data Loading
+
+        self.trajs = self.trajs[slicing]
         # (N_data, N_trajs, L_route, 2)
-        self.routes = torch.load(os.path.join(folder_path, "routes.pth"))[slicing]
+        self.routes = torch.load(os.path.join(folder_path, "routes.pt"))[slicing]
         # (N_data, N_segs, N_interp, 2)
-        self.segs = torch.load(os.path.join(folder_path, "segs.pth"))[slicing]
+        self.segs = torch.load(os.path.join(folder_path, "segs.pt"))[slicing].to(torch.float32)
         # (N_data, 3, H, W)
-        self.images = torch.load(os.path.join(folder_path, "images.pth"))[slicing]
+        self.images = torch.load(os.path.join(folder_path, "images.pt"))[slicing]
+        self.images = torch.nn.functional.interpolate(self.images, (img_H, img_W), mode="bilinear")
         # (N_data, 1, H, W)
-        self.heatmaps = torch.load(os.path.join(folder_path, "heatmaps.pth"))[slicing]
+        self.heatmaps = torch.load(os.path.join(folder_path, "heatmaps.pt"))[slicing]
+        self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
+
+        # Computing lengths
+
+        # (N_data, N_trajs), compute non-zeros points in each trajectory
+        self.traj_lens = torch.sum(torch.all(self.trajs != 0, dim=-1), dim=-1)
+        # (N_data, N_trajs), compute non-zeros points in each route
+        self.route_lens = torch.sum(torch.all(self.routes != 0, dim=-1), dim=-1)
+        # (N_data, N_segs), compute non-zeros points in each segment
+        self.seg_nums = torch.sum(torch.all(self.segs != 0, dim=-1), dim=-1)
+
+        # Get the data dimensions
 
         self.N_data, self.N_trajs, self.L_traj = self.trajs.shape[:3]
         self.L_route = self.routes.shape[2]
         self.N_segs, self.N_interp = self.segs.shape[1:3]
-        self.img_H, self.img_W = self.images.shape[2:]
+
+        # Data normalization
+        # While do normalization, we must be careful with the padding points
+        # They must not involve in the normalization process
+        for b in tqdm(range(self.N_data), desc="Normalizing data"):
+            # (N_points, 2)
+            traj_points = torch.cat([self.trajs[b, i, :self.traj_lens[b, i]] for i in range(self.N_trajs)], dim=0)
+            mean_point = traj_points.mean(dim=0).view(1, 1, 2)
+            std_point = traj_points.std(dim=0).view(1, 1, 2)
+            for traj_i in range(self.N_trajs):
+                valid_len = self.traj_lens[b, traj_i]
+                self.trajs[b, traj_i, :valid_len] = (self.trajs[b, traj_i, :valid_len] - mean_point) / std_point
+                valid_len = self.route_lens[b, traj_i]
+                self.routes[b, traj_i, :valid_len] = (self.routes[b, traj_i, :valid_len] - mean_point) / std_point
+
+            for seg_i in range(self.N_segs):
+                valid_len = self.seg_nums[b, seg_i]
+                self.segs[b, seg_i, :valid_len] = (self.segs[b, seg_i, :valid_len] - mean_point) / std_point
+
+
+
+    def __str__(self):
+        return f"RoadNetworkDataset: {self.set_name} set\n" \
+                f"\tNumber of data: {self.N_data}\n" \
+                f"\tTrajectories per Sample: {self.N_trajs}\n" \
+                f"\tLength of trajectory: {self.L_traj}\n" \
+                f"\tLength of route: {self.L_route}\n" \
+                f"\tSegments per Sample: {self.N_segs}\n" \
+                f"\tNumber of interpolation points: {self.N_interp}\n" \
+                f"\tImage size: ({self.img_H}, {self.img_W})"
+
+
+    def __repr__(self):
+        return self.__str__().replace("\n", ", ")
 
 
     def __len__(self) -> int:
-        return self.N_data
+        if self.drop_last:
+            return self.N_data // self.batch_size
+        else:
+            if self.N_data % self.batch_size == 0:
+                return self.N_data // self.batch_size
+            else:
+                return self.N_data // self.batch_size + 1
 
 
-    def augmentation(self, trajs: Tensor, paths: Tensor, graph: Tensor, heatmap: Tensor):
+    def augmentation(self, batch: Dict[str, Tensor]) -> Dict[str, Tensor]:
         """
         Apply data augmentation to the given sample
         :param trajs: (N, 128, 2)
@@ -64,73 +122,76 @@ class RoadNetworkDataset(Dataset):
         :return: The augmented sample
         """
 
-        match (choice(["None", "HFlip", "VFlip"])):
-            case 0:
-                pass
-            case 1:     # left-right flip
-                # For the coodrinates, flipping is done by negation
-                trajs[..., 0] = -trajs[..., 0]
-                paths[..., 0] = -paths[..., 0]
-                graph[..., 0] = -graph[..., 0]
-                # For the heatmap, flipping is done by reversing the tensor
-                heatmap = torch.flip(heatmap, dims=(2,))
-            case 2:     # top-bottom flip
-                trajs[..., 1] = -trajs[..., 1]
-                paths[..., 1] = -paths[..., 1]
-                graph[..., 1] = -graph[..., 1]
-                heatmap = torch.flip(heatmap, dims=(1,))
+        B = batch["trajs"].shape[0]
+        point_shift = torch.randn(B, 1, 1, 2).to(DEVICE) * 0.05
+        batch["trajs"] += point_shift * (batch["trajs"] != 0)
+        batch["routes"] += point_shift * (batch["routes"] != 0)
+        batch["segs"] += point_shift * (batch["segs"] != 0)
 
-        # graph data is unordered, so we need to shuffle it
-        perm = torch.randperm(graph.shape[0])
-        graph = graph[perm]
+        return batch
 
-        # traj and path data are ordered, so we need to shuffle them in the same way
-        perm = torch.randperm(trajs.shape[0])
-        trajs = trajs[perm]
-        paths = paths[perm]
-
-        return trajs, paths, graph, heatmap
-
-    def __getitem__(self, idx: int | slice) -> Tuple[Tensor, ...]:
+    def __getitem__(self, idx) -> Dict[str, Tensor]:
         """
         Return the sample at the given index
         :param idx: the index of the sample
         :return: the sample at the given index
         """
-        trajs = self.trajs[idx][:self.max_trajs].to(DEVICE)     # (N, 128, 2)
-        paths = self.paths[idx][:self.max_trajs].to(DEVICE)     # (N, 21, 2)
-        graph = self.graph_tensor[idx].to(DEVICE)   # (G, 2, 2)
-        heatmap = self.heatmap[idx].to(DEVICE)  # (2, H, W)
+        if isinstance(idx, int):
+            idx = [idx]
 
-        # for each graph segments of shape (2, 2), [[x1, y1], [x2, y2]]
-        # sort the segments so that x1 < x2
-        graph_swap = graph.flip(1)
-        swap_indices = graph[:, 0, 0] > graph[:, 1, 0]
-        graph[swap_indices] = graph_swap[swap_indices]
+        trajs = self.trajs[idx].to(DEVICE)
+        routes = self.routes[idx].to(DEVICE)
+        segs = self.segs[idx].to(DEVICE)
+
+        # permute the order of the trajectories and routes
+        traj_perm = torch.randperm(trajs.shape[1])
+        trajs = trajs[:, traj_perm]
+        routes = routes[:, traj_perm]
+
+        # permute the order of the segments
+        segs_perm = torch.randperm(segs.shape[1])
+        segs = segs[:, segs_perm]
+
+        batch_data = {
+            "trajs": trajs,
+            "routes": routes,
+            "segs": segs,
+            "heatmap": self.heatmaps[idx].to(DEVICE),
+            "image": self.images[idx].to(DEVICE),
+            "traj_lens": self.traj_lens[idx].to(DEVICE),
+            "route_lens": self.route_lens[idx].to(DEVICE),
+            "seg_nums": self.seg_nums[idx].to(DEVICE)
+        }
+
         if self.enable_aug:
-            trajs, paths, graph, heatmap = self.augmentation(trajs, paths, graph, heatmap)
-        return (trajs, paths, graph, heatmap)
+            return self.augmentation(batch_data)
+        return batch_data
+
+
+    def __iter__(self):
+        shuffled_indices = torch.randperm(self.N_data)
+
+        if self.drop_last:
+            end = self.N_data - self.N_data % self.batch_size
+        else:
+            end = self.N_data
+
+        for i in range(0, end, self.batch_size):
+            yield self[shuffled_indices[i:i+self.batch_size]]
 
     @staticmethod
-    def collate_fn(batch_list: List[Tuple[Tensor, ...]]) -> Dict[str, Tensor]:
-        """
-        Collate function for the dataset, this function is used by DataLoader to collate a batch of samples
-        :param batch_list: a list of samples
-        :return: a batch of samples
-        """
-        trajs_list, paths_list, graph_list, heatmap_list = zip(*batch_list)
+    def sequencesToSegments(seqs: torch.Tensor, L_seg: int) -> torch.Tensor:
+        # seqs: (B, N_seqs, L_seq, D_token)
+        B, N_seqs, L_seq, D_token = seqs.shape
 
-        segments = torch.stack(graph_list).flatten(2)  # (B, G, 2, 2) -> (B, G, 4)
-        valid_mask = torch.sum(torch.abs(segments), dim=-1) > 0  # (B, G)
-        segments = torch.cat([segments, valid_mask.unsqueeze(-1).float()], dim=-1)  # (B, G, 5)
+        result = torch.cat([
+            seqs[:, :, :-1].view(B, N_seqs, -1, L_seg - 1, 2),  # (B, N_seqs, N_segs, L_seg-1, 2)
+            seqs[:, :, L_seg - 1::L_seg - 1].unsqueeze(3)],  # (B, N_seqs, N_segs, 1, 2)
+            dim=-2)
 
-        heatmaps = torch.stack(heatmap_list)
+        # (B, N_seqs, N_segs, L_seg, 2)
 
-        return {"trajs": torch.stack(trajs_list),
-                "paths": torch.stack(paths_list),
-                "segs": segments,
-                "heatmaps": heatmaps[:, 0:1],
-                "nodemaps": heatmaps[:, 1:2]}
+        return result.flatten(-2, -1)  # (B, N_seqs, N_segs, L_seg * 2)
 
 
     @staticmethod

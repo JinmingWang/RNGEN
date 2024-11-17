@@ -47,13 +47,9 @@ class DRAC(nn.Module):
         # We use -inf because later we will use softmax to get the weights
         # We use softmax because we are computing weighted average and the sum of the weights should be 1
         filtered_cluster_mat = torch.masked_fill(cluster_mat, threshold_mask, -torch.inf) # (B, L, L)
-        # We convert xyxy2xydl because xyxy can be (x1, y1, x2, y2) or (x2, y2, x1, y1)
-        # If we compute the average between this kind of opposite line segments, the result will be wrong
-        # So we convert it to xydl, which is (x_center, y_center, direction, length)
-        xydl_seqs = xyxy2xydl(seqs)
-        # Compute weighted average and convert back to xyxy
-        cluster_means = torch.softmax(filtered_cluster_mat, dim=-1) @ xydl_seqs
-        cluster_means = xydl2xyxy(cluster_means)
+        # TODO: Check if this is correct
+        # segment can be {p1, ... pn} or {pn, ... p1}
+        cluster_means = torch.softmax(filtered_cluster_mat, dim=-1) @ seqs
 
         # Step 2: Duplicate Removal, only keep the first token in the cluster
         # lower[i, j] = 1 means token i and j are in the same cluster, and i is after j
@@ -74,34 +70,38 @@ class DRAC(nn.Module):
 
 class CrossDomainVAE(nn.Module):
     @cacheArgumentsUponInit
-    def __init__(self, N_paths: int, L_path: int, D_enc: int, threshold: float=0.5):
+    def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
 
-        self.N_nodes = N_paths * L_path
-        self.N_segs = N_paths * (L_path - 1)
-
-        # Input (B, N, L, D)
+        # Input (B, N=64, L=256, D)
         self.encoder = nn.Sequential(
-            Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L)
-            nn.Conv1d(2, 32, 3, 1, 1),
-            Swish(),
+            Rearrange("B N L D", "(B N) D L"),  # (BN, 2, 256)
+
+            nn.Conv1d(2, 32, 3, 1, 1), Swish(),
+            Res1D(32, 64, 32),  # (BN, 64, 256)
+            Res1D(32, 64, 32),  # (BN, 64, 256)
 
             Conv1dBnAct(32, 64, 3, 1, 1),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
+            Res1D(64, 128, 64),     # (BN, 128, 256)
+            Res1D(64, 128, 64),     # (BN, 128, 256)
 
-            Rearrange("(B N) D L", "B N L D", N=N_paths),
+            Conv1dBnAct(64, 128, 3, 1, 1),
+            Res1D(128, 256, 128),   # (BN, 128, 256)
+            Res1D(128, 256, 128),   # (BN, 128, 256)
+
+            Rearrange("(B N) D L", "B N L D", N=N_routes),
         )
 
-        self.mu_head = nn.Linear(64, D_enc)
-        self.logvar_head = nn.Linear(64, D_enc)
+        self.N_nodes = N_routes * L_route // 16
+        self.N_segs = N_routes * (L_route // (16 - 1))
+
+        self.mu_head = nn.Linear(128, 2)
+        self.logvar_head = nn.Linear(128, 2)
 
         self.decoder_shared = nn.Sequential(
-            Rearrange("B L D", "B D L"),
+            Rearrange("B N L D", "(B N) D L"),
 
-            nn.Conv1d(D_enc * 2, 64, 1, 1, 0),
+            nn.Conv1d(N_interp * 2, 64, 1, 1, 0),
             Res1D(64, 128, 64),
             Res1D(64, 128, 64),
             Res1D(64, 128, 64),
@@ -111,23 +111,25 @@ class CrossDomainVAE(nn.Module):
             Res1D(128, 256, 128),
             Res1D(128, 256, 128),
 
-            Rearrange("B D L", "B L D"),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
+            nn.Conv1d(128, 256, 1, 1, 0),
+
+            Rearrange("(B N) D L", "B (N L) D", N=N_routes),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
         )   # (B, D=128, L)
 
         self.segs_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            nn.Linear(128, 4),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            nn.Linear(256, N_interp * 2),
         )
 
         self.cluster_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            AttentionBlock(self.N_segs, 128, 64, 512, 128, 8, 0.0),
-            nn.Linear(128, 128),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
+            nn.Linear(256, 128),
             Swish(),
             MultiHeadSelfRelationMatrix(128, 128, 16), # (B, L, L)
             nn.Sigmoid()
@@ -138,22 +140,34 @@ class CrossDomainVAE(nn.Module):
 
     def encode(self, paths):
         # paths: (B, N, L, 2)
+        B, N, L = paths.shape[:3]
+
         x = self.encoder(paths)
-        return self.mu_head(x), self.logvar_head(x)
+        z_mean = self.mu_head(x)    # (B, N, L, 2)
+        z_logvar = self.logvar_head(x)  # (B, N, L, 2)
+
+        z_mean = torch.cat([
+            z_mean[:, :, :-1].view(B, N, -1, self.N_interp - 1, 2),
+            z_mean[:, :, self.N_interp - 1::self.N_interp - 1].unsqueeze(3)],  # (B, N, L-1, 2)
+            dim=-2).flatten(-2, -1)
+
+        z_logvar = torch.cat([
+            z_logvar[:, :, :-1].view(B, N, -1, self.N_interp - 1, 2),
+            z_logvar[:, :, self.N_interp - 1::self.N_interp - 1].unsqueeze(3)],  # (B, N, L-1, 2)
+            dim=-2).flatten(-2, -1)
+
+        return z_mean, z_logvar
 
     def decode(self, z):
-        # encodings: (B, N, L, D)
-        # paths: (B, N, L, 2)
+        # z: (B, N_trajs, N_segs, N_interp * 2)
 
-        B, N, L, D = z.shape
-        encoding_pairs = torch.cat([z[..., 1:, :], z[..., :-1, :]], dim=-1)  # (B, N, L-1, 4)
-        encoding_pairs = encoding_pairs.view(B, -1, D * 2).contiguous()  # (B, N_segs, 4)
-
-        x = self.decoder_shared(encoding_pairs)
+        x = self.decoder_shared(z)
         duplicate_segs = self.segs_head(x)
         cluster_mat = self.cluster_head(x)
 
         cluster_means, coi_means = self.drac(duplicate_segs, cluster_mat)
+
+        duplicate_segs = duplicate_segs.view(z.shape[0], self.N_routes, -1, 2 * self.N_interp)
 
         return duplicate_segs, cluster_mat, cluster_means, coi_means
 

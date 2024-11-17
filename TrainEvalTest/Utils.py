@@ -70,7 +70,7 @@ class PlotManager:
 
     def plotSegments(self, segs, row, col, title, refresh=True, color=None):
         """
-        Plot line segments given a tensor of shape (N, 5), where N is the number of segments
+        Plot line segments given a tensor of shape (N, ?, 2), where N is the number of segments
         and each segment is defined by two points in 2D.
         """
         ax = self.axs[row, col]
@@ -80,13 +80,10 @@ class PlotManager:
 
         # Extract the points for each line segment
         for seg in segs:
-            x = seg[[0, 2]].cpu().detach().numpy()  # X coordinates
-            y = seg[[1, 3]].cpu().detach().numpy() # Y coordinates
-            if len(seg) == 3:
-                seg_validity = seg[4].cpu().detach().numpy()  # Validity of the segment
-                ax.plot(x, y, marker='.', linestyle='-', markersize=5 * seg_validity, lw=seg_validity, alpha=0.5, color=color)
-            else:
-                ax.plot(x, y, marker='.', linestyle='-', markersize=5, alpha=0.5, color=color)
+            x = segs[..., 0].cpu().detach().numpy()  # X coordinates
+            y = segs[..., 1].cpu().detach().numpy()
+            ax.plot(x, y, linestyle='-', alpha=0.5, color=color)
+            ax.scatter(x[0], y[0], marker='.', color=color, s=10)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])
