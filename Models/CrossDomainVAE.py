@@ -73,52 +73,41 @@ class CrossDomainVAE(nn.Module):
     def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
 
-        # Input (B, N=64, L=256, D)
+        # Input (B, N_trajs, L_route, N_interp, 2)
         self.encoder = nn.Sequential(
-            Rearrange("B N L D", "(B N) D L"),  # (BN, 2, 256)
+            Rearrange("B N_routes L_route N_interp D", "(B N_routes) (N_interp D) L_route"),
 
-            nn.Conv1d(2, 32, 3, 1, 1), Swish(),
-            Res1D(32, 64, 32),  # (BN, 64, 256)
-            Res1D(32, 64, 32),  # (BN, 64, 256)
+            nn.Conv1d(2 * N_interp, 64, 3, 1, 1),
+            Swish(),
 
-            Conv1dBnAct(32, 64, 3, 1, 1),
-            Res1D(64, 128, 64),     # (BN, 128, 256)
-            Res1D(64, 128, 64),     # (BN, 128, 256)
+            *[Res1D(64, 128, 64) for _ in range(3)],
+            Conv1dBnAct(64, 128, 1, 1, 0),
 
-            Conv1dBnAct(64, 128, 3, 1, 1),
-            Res1D(128, 256, 128),   # (BN, 128, 256)
-            Res1D(128, 256, 128),   # (BN, 128, 256)
+            *[Res1D(128, 256, 128) for _ in range(3)],
+            Conv1dBnAct(128, 256, 1, 1, 0),
 
-            Rearrange("(B N) D L", "B N L D", N=N_routes),
+            Rearrange("(B N_routes) D L_route", "B N_routes L_route D", N_routes=N_routes),
         )
 
-        self.N_nodes = N_routes * L_route // 16
-        self.N_segs = N_routes * (L_route // (16 - 1))
+        self.mu_head = nn.Linear(256, 2 * N_interp)
+        self.logvar_head = nn.Linear(256, 2 * N_interp)
 
-        self.mu_head = nn.Linear(128, 2)
-        self.logvar_head = nn.Linear(128, 2)
+        self.N_segs = N_routes * L_route
 
         self.decoder_shared = nn.Sequential(
-            Rearrange("B N L D", "(B N) D L"),
+            Rearrange("B N_routes L_route D", "(B N_routes) D L_route"),
 
             nn.Conv1d(N_interp * 2, 64, 1, 1, 0),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
+            *[Res1D(64, 128, 64) for _ in range(3)],
 
             nn.Conv1d(64, 128, 1, 1, 0),
-            Res1D(128, 256, 128),
-            Res1D(128, 256, 128),
-            Res1D(128, 256, 128),
+            *[Res1D(128, 256, 128) for _ in range(3)],
 
             nn.Conv1d(128, 256, 1, 1, 0),
 
-            Rearrange("(B N) D L", "B (N L) D", N=N_routes),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-        )   # (B, D=128, L)
+            Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
+            *[AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0) for _ in range(4)],
+        )
 
         self.segs_head = nn.Sequential(
             AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
@@ -140,34 +129,27 @@ class CrossDomainVAE(nn.Module):
 
     def encode(self, paths):
         # paths: (B, N, L, 2)
-        B, N, L = paths.shape[:3]
-
         x = self.encoder(paths)
-        z_mean = self.mu_head(x)    # (B, N, L, 2)
-        z_logvar = self.logvar_head(x)  # (B, N, L, 2)
-
-        z_mean = torch.cat([
-            z_mean[:, :, :-1].view(B, N, -1, self.N_interp - 1, 2),
-            z_mean[:, :, self.N_interp - 1::self.N_interp - 1].unsqueeze(3)],  # (B, N, L-1, 2)
-            dim=-2).flatten(-2, -1)
-
-        z_logvar = torch.cat([
-            z_logvar[:, :, :-1].view(B, N, -1, self.N_interp - 1, 2),
-            z_logvar[:, :, self.N_interp - 1::self.N_interp - 1].unsqueeze(3)],  # (B, N, L-1, 2)
-            dim=-2).flatten(-2, -1)
+        z_mean = self.mu_head(x)
+        z_logvar = self.logvar_head(x)
 
         return z_mean, z_logvar
 
     def decode(self, z):
-        # z: (B, N_trajs, N_segs, N_interp * 2)
+        # z: (B, N_routes, L_route, N_interp * 2)
+        B, N_routes, L_route, _ = z.shape
 
-        x = self.decoder_shared(z)
-        duplicate_segs = self.segs_head(x)
-        cluster_mat = self.cluster_head(x)
+        x = self.decoder_shared(z)  # (B, N_routes*L_route, 256)
+        duplicate_segs = self.segs_head(x)  # (B, N_routes*L_route, N_interp * 2)
+        cluster_mat = self.cluster_head(x)  # (B, N_routes*L_route, N_routes*L_route)
 
+        # cluster_means: (B, N_routes*L_route, N_interp * 2)
+        # coi_means: (B, ? , N_interp*2)
         cluster_means, coi_means = self.drac(duplicate_segs, cluster_mat)
 
-        duplicate_segs = duplicate_segs.view(z.shape[0], self.N_routes, -1, 2 * self.N_interp)
+        duplicate_segs = duplicate_segs.unflatten(-1, (-1, 2))
+        cluster_means = cluster_means.unflatten(-1, (-1, 2))
+        coi_means = [coi_mean.unflatten(-1, (-1, 2)) for coi_mean in coi_means]
 
         return duplicate_segs, cluster_mat, cluster_means, coi_means
 

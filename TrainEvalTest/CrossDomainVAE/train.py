@@ -18,15 +18,15 @@ from Models import CrossDomainVAE, ClusterLoss, KLLoss
 def train():
     # Dataset & DataLoader
     dataset = RoadNetworkDataset("Dataset/RoadsGetter",
-                                 batch_size=batch_size,
+                                 batch_size=B,
                                  drop_last=False,
                                  set_name="debug",
                                  enable_aug=True,
-                                 img_H=256,
-                                 img_W=256
+                                 img_H=16,
+                                 img_W=16
                                  )
 
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
 
     cluster_loss_func = ClusterLoss()
     rec_loss_func = torch.nn.MSELoss()
@@ -46,7 +46,7 @@ def train():
     mov_avg_rec = MovingAvg(MOV_AVG_LEN * len(dataset))
     global_step = 0
     best_loss = float("inf")
-    plot_manager = PlotManager(5, 1, 5)
+    plot_manager = PlotManager(4, 1, 4)
 
     with ProgressManager(len(dataset), EPOCHS, 5, 2, ["CLL", "KLL", "REC", "lr"]) as progress:
         for e in range(EPOCHS):
@@ -54,22 +54,19 @@ def train():
             for i, batch in enumerate(dataset):
                 batch: Dict[str, torch.Tensor]
                 optimizer.zero_grad()
-                B = batch["routes"].shape[0]
 
-                # Every 8 points are put together to form a segment
-                # However, there should be 1 overlapping point between adjacent segments
-                # routes: (B, N, L, 2)
-                batch["duplicate_segs"] = RoadNetworkDataset.sequencesToSegments(batch["routes"], dataset.N_interp)
-                # (B, N_trajs, N_segs, L_seg * 2)
-
-                # batch["duplicate_segs"] = batch["duplicate_segs"].view(B, -1, dataset.N_interp, 2).contiguous()
-                filter_mask = ~torch.any(batch["duplicate_segs"] == 0, dim=2, keepdim=True)
-                batch["duplicate_segs"] = batch["duplicate_segs"] * filter_mask
+                # routes: (B, N_trajs, L_route, N_interp, 2)
+                # routes_enc: (B, N_trajs, L_route, N_interp*2)
+                # decoded: (B, N_trajs*L_route, N_interp, 2)
+                # cluster_mat: (B, N_trajs*L_route, N_trajs*L_route)
+                # cluster_means: (B, N_trajs*L_route, N_interp, 2)
+                # coi_means: (B, ?, N_interp, 2)
+                # segs: (B, N_segs, N_interp, 2)
 
                 z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["routes"])
                 kll = kl_loss_func(z_mean, z_logvar)
-                rec = rec_loss_func(duplicate_segs, batch["duplicate_segs"])
-                cll = cluster_loss_func(duplicate_segs.detach().view(B, -1, dataset.N_interp*2), cluster_mat, batch["segs"].flatten(-2, -1))
+                rec = rec_loss_func(duplicate_segs, batch["routes"].flatten(1, 2))
+                cll = cluster_loss_func(duplicate_segs.detach(), cluster_mat, batch["segs"])
                 loss = kll + cll + rec
 
                 # Backpropagation
@@ -100,11 +97,10 @@ def train():
             #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotTrajs(batch["routes"][0], 0, 0, "Routes")
-            plot_manager.plotSegments(batch["segs"][0].view(-1, 2), 0, 1, "Segs")
-            plot_manager.plotSegments(coi_means[0].view(-1, 2), 0, 2, "Pred Segs")
-            plot_manager.plotSegments(batch["duplicate_segs"][0].view(-1, 2), 0, 3, "Duplicate Segs")
-            plot_manager.plotSegments(duplicate_segs[0].view(-1, 2), 0, 4, "Pred Duplicate Segs")
+            plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes")
+            plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs")
+            plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs")
+            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 

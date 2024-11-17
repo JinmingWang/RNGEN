@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "xydl"
+COMMENT = "segs"
 
 # Training Parameters
 KL_WEIGHT = 1e-6
@@ -11,7 +11,7 @@ LR_REDUCE_PATIENCE = 10
 LR_REDUCE_MIN = 1e-7
 LR_REDUCE_THRESHOLD = 1e-5
 EPOCHS = 500
-B = 64
+B = 32
 LOG_DIR = f"./Runs/CDVAE/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{COMMENT}/"
 
 # Logging Parameters

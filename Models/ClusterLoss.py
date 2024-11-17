@@ -17,25 +17,26 @@ class ClusterLoss(nn.Module):
         # input_seq: (B, M, D)
         # pred_cluster_mat: (B, M, M)
         # target_seq: (B, N, D), N <= M
-        B, M, D = pred_seq.shape
+        B, M, D, _ = pred_seq.shape
 
         # Step 1. find the matching between input_seq and target_seq
         # pred_seq: (x1, y1, x2, y2)
         # pred_seqp: (x2, y2, x1, y1)
-        pred_swap = pred_seq.flip(-1)
-        cost_matrices_A = torch.cdist(pred_seq, target_seq, p=2)  # (B, M, N)
-        cost_matrices_B = torch.cdist(pred_swap, target_seq, p=2)    # (B, M, N)
-        cost_matrices = torch.min(cost_matrices_A, cost_matrices_B).detach().cpu().numpy()  # (B, M, N)
+        # pred_swap = pred_seq.flip(-1)
+        #cost_matrices_A = torch.cdist(pred_seq, target_seq, p=2)  # (B, M, N)
+        #cost_matrices_B = torch.cdist(pred_swap, target_seq, p=2)    # (B, M, N)
+        #cost_matrices = torch.min(cost_matrices_A, cost_matrices_B).detach().cpu().numpy()  # (B, M, N)
+        cost_matrices = torch.cdist(pred_seq.flatten(2), target_seq.flatten(2), p=2)
 
         # Step 2. rearrange the target_seq with the matching, so input seq and target_seq have 1-1 correspondence
         # if target_seq[j] is the nearest to input_seq[i], then matched_target_seq[i] = target_seq[j]
         nearest_match = cost_matrices.argmin(axis=2)  # (B, M)
-        matched_target_seq = torch.zeros_like(pred_seq)    # (B, M, D)
+        matched_target_seq = torch.zeros_like(pred_seq)    # (B, M, L, 2)
         for b in range(B):
             matched_target_seq[b] = target_seq[b, nearest_match[b]]
 
         # Step 3. get the cluster matrix of the matched target_seq
-        target_cluster_mat = self.getClusterMat(matched_target_seq)
+        target_cluster_mat = self.getClusterMat(matched_target_seq.flatten(2))
         # Step 4. calculate the loss
         return self.base_loss(pred_cluster_mat, target_cluster_mat)
 

@@ -21,6 +21,8 @@ class RoadNetworkDataset():
         :param max_trajs: the maximum number of trajectories to use
         :param set_name: the name of the set, either "train" or "test"
         """
+        print("Loading RoadNetworkDataset")
+
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.set_name = set_name
@@ -28,8 +30,10 @@ class RoadNetworkDataset():
         self.img_H = img_H
         self.img_W = img_W
 
+        dataset = torch.load(os.path.join(folder_path, "dataset.pt"))
+
         # (N_data, N_trajs, L_traj, 2)
-        self.trajs = torch.load(os.path.join(folder_path, "trajs.pt"))
+        self.trajs = dataset["trajs"]
         data_count = len(self.trajs)
         if set_name == "train":
             slicing = slice(int(data_count * 0.9))
@@ -41,61 +45,36 @@ class RoadNetworkDataset():
         # Data Loading
 
         self.trajs = self.trajs[slicing]
-        # (N_data, N_trajs, L_route, 2)
-        self.routes = torch.load(os.path.join(folder_path, "routes.pt"))[slicing]
+        # (N_data, N_trajs, L_route, N_interp, 2)
+        self.routes = dataset["routes"][slicing]
         # (N_data, N_segs, N_interp, 2)
-        self.segs = torch.load(os.path.join(folder_path, "segs.pt"))[slicing].to(torch.float32)
+        self.segs = dataset["segs"][slicing]
         # (N_data, 3, H, W)
-        self.images = torch.load(os.path.join(folder_path, "images.pt"))[slicing]
+        self.images = dataset["images"][slicing]
         self.images = torch.nn.functional.interpolate(self.images, (img_H, img_W), mode="bilinear")
         # (N_data, 1, H, W)
-        self.heatmaps = torch.load(os.path.join(folder_path, "heatmaps.pt"))[slicing]
+        self.heatmaps = dataset["heatmaps"][slicing]
         self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
 
-        # Computing lengths
+        self.L_traj = dataset["traj_lens"]
+        self.L_route = dataset["route_lens"]
+        self.N_segs = dataset["seg_nums"]
 
-        # (N_data, N_trajs), compute non-zeros points in each trajectory
-        self.traj_lens = torch.sum(torch.all(self.trajs != 0, dim=-1), dim=-1)
-        # (N_data, N_trajs), compute non-zeros points in each route
-        self.route_lens = torch.sum(torch.all(self.routes != 0, dim=-1), dim=-1)
-        # (N_data, N_segs), compute non-zeros points in each segment
-        self.seg_nums = torch.sum(torch.all(self.segs != 0, dim=-1), dim=-1)
+        self.mean_norm = dataset["point_mean"]
+        self.std_norm = dataset["point_std"]
+
+        self.bboxes = dataset["bboxes"]
 
         # Get the data dimensions
 
-        self.N_data, self.N_trajs, self.L_traj = self.trajs.shape[:3]
-        self.L_route = self.routes.shape[2]
-        self.N_segs, self.N_interp = self.segs.shape[1:3]
+        self.N_data, self.N_trajs, self.max_L_traj = self.trajs.shape[:3]
+        self.max_L_route = self.routes.shape[2]
+        self.max_N_segs, self.N_interp = self.segs.shape[1:3]
 
-        # Data normalization
-        # While do normalization, we must be careful with the padding points
-        # They must not involve in the normalization process
-        for b in tqdm(range(self.N_data), desc="Normalizing data"):
-            # (N_points, 2)
-            traj_points = torch.cat([self.trajs[b, i, :self.traj_lens[b, i]] for i in range(self.N_trajs)], dim=0)
-            mean_point = traj_points.mean(dim=0).view(1, 1, 2)
-            std_point = traj_points.std(dim=0).view(1, 1, 2)
-            for traj_i in range(self.N_trajs):
-                valid_len = self.traj_lens[b, traj_i]
-                self.trajs[b, traj_i, :valid_len] = (self.trajs[b, traj_i, :valid_len] - mean_point) / std_point
-                valid_len = self.route_lens[b, traj_i]
-                self.routes[b, traj_i, :valid_len] = (self.routes[b, traj_i, :valid_len] - mean_point) / std_point
-
-            for seg_i in range(self.N_segs):
-                valid_len = self.seg_nums[b, seg_i]
-                self.segs[b, seg_i, :valid_len] = (self.segs[b, seg_i, :valid_len] - mean_point) / std_point
-
-
+        print(str(self))
 
     def __str__(self):
-        return f"RoadNetworkDataset: {self.set_name} set\n" \
-                f"\tNumber of data: {self.N_data}\n" \
-                f"\tTrajectories per Sample: {self.N_trajs}\n" \
-                f"\tLength of trajectory: {self.L_traj}\n" \
-                f"\tLength of route: {self.L_route}\n" \
-                f"\tSegments per Sample: {self.N_segs}\n" \
-                f"\tNumber of interpolation points: {self.N_interp}\n" \
-                f"\tImage size: ({self.img_H}, {self.img_W})"
+        return f"RoadNetworkDataset: {self.set_name} set with {self.N_data} samples packed to {len(self)} batches"
 
 
     def __repr__(self):
@@ -125,7 +104,7 @@ class RoadNetworkDataset():
         B = batch["trajs"].shape[0]
         point_shift = torch.randn(B, 1, 1, 2).to(DEVICE) * 0.05
         batch["trajs"] += point_shift * (batch["trajs"] != 0)
-        batch["routes"] += point_shift * (batch["routes"] != 0)
+        batch["routes"] += point_shift.unsqueeze(1) * (batch["routes"] != 0)
         batch["segs"] += point_shift * (batch["segs"] != 0)
 
         return batch
@@ -158,9 +137,12 @@ class RoadNetworkDataset():
             "segs": segs,
             "heatmap": self.heatmaps[idx].to(DEVICE),
             "image": self.images[idx].to(DEVICE),
-            "traj_lens": self.traj_lens[idx].to(DEVICE),
-            "route_lens": self.route_lens[idx].to(DEVICE),
-            "seg_nums": self.seg_nums[idx].to(DEVICE)
+            "L_traj": self.L_traj[idx].to(DEVICE),
+            "L_route": self.L_route[idx].to(DEVICE),
+            "N_segs": self.N_segs[idx].to(DEVICE),
+            "mean_point": self.mean_norm[idx].to(DEVICE),
+            #"std_point": self.std_norm[idx].to(DEVICE),
+            "bbox": self.bboxes[idx].to(DEVICE)
         }
 
         if self.enable_aug:

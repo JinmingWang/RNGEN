@@ -70,8 +70,7 @@ class PlotManager:
 
     def plotSegments(self, segs, row, col, title, refresh=True, color=None):
         """
-        Plot line segments given a tensor of shape (N, ?, 2), where N is the number of segments
-        and each segment is defined by two points in 2D.
+        Plot line segments given a tensor of shape (..., N_points, 2)
         """
         ax = self.axs[row, col]
         if refresh:
@@ -79,11 +78,12 @@ class PlotManager:
         ax.set_title(title, fontsize=14, color='darkblue')
 
         # Extract the points for each line segment
-        for seg in segs:
-            x = segs[..., 0].cpu().detach().numpy()  # X coordinates
-            y = segs[..., 1].cpu().detach().numpy()
-            ax.plot(x, y, linestyle='-', alpha=0.5, color=color)
-            ax.scatter(x[0], y[0], marker='.', color=color, s=10)
+        x_coords = segs.flatten(0, -3)[..., 0].cpu().detach().numpy()  # (N_segs, N_points)
+        y_coords = segs.flatten(0, -3)[..., 1].cpu().detach().numpy()  # (N_segs, N_points)
+        for seg_i in range(len(segs)):
+            ax.plot(x_coords[seg_i], y_coords[seg_i], linestyle='-', alpha=0.5, color=color)
+            ax.scatter(x_coords[seg_i, 0], y_coords[seg_i, 0], marker='.', color=color, s=10)
+            ax.scatter(x_coords[seg_i, -1], y_coords[seg_i, -1], marker='.', color=color, s=10)
 
         ax.set_xlim([-3, 3])
         ax.set_ylim([-3, 3])
