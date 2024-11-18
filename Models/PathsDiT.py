@@ -57,7 +57,7 @@ class Block(nn.Module):
 
 class PathsDiT(nn.Module):
     @cacheArgumentsUponInit
-    def __init__(self, D_in: int, N_routes: int, L_route: int, d_context: int, n_layers: int, T: int):
+    def __init__(self, D_in: int, N_routes: int, L_route: int, L_traj: int, d_context: int, n_layers: int, T: int):
         super().__init__()
 
         self.time_embed = nn.Sequential(
@@ -78,6 +78,8 @@ class PathsDiT(nn.Module):
             Rearrange("(B N) D L", "B N L D", N=N_routes)
         )
 
+        self.pos_route = nn.Parameter(torch.randn(1, 1, L_route, 128))
+
         self.context_proj = nn.Sequential(
             Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
             nn.Conv1d(d_context, 32, 3, 1, 1),
@@ -89,21 +91,23 @@ class PathsDiT(nn.Module):
             Conv1dBnAct(64, 128, 3, 2, 1),
             Res1D(128, 256, 128),
             Res1D(128, 256, 128),
+
+            Conv1dBnAct(128, 256, 3, 2, 1),
             Rearrange("(B N) D L", "B N L D", N=N_routes)
         )
 
-        self.position = nn.Parameter(torch.randn(1, 1, L_route, 128))
+        self.pos_traj = nn.Parameter(torch.randn(1, 1, L_traj//8, 256))
 
         self.stages = SequentialWithAdditionalInputs(
-            *[Block(N_routes, L_route, 128, 128, 128, 128, 8) for _ in range(n_layers)]
+            *[Block(N_routes, L_route, 128, 128, 256, 128, 8) for _ in range(n_layers)]
         )
 
         # (B, N, L, 128)
         self.head = nn.Sequential(
             Rearrange("B (N L) D",  "B N L D", N=N_routes),
-            nn.Linear(128, 32),
+            nn.Linear(128, 64),
             Swish(),
-            nn.Linear(32, 4)
+            nn.Linear(64, D_in)
         )
 
     def forward(self, x, context, t):
@@ -115,8 +119,8 @@ class PathsDiT(nn.Module):
         B = x.shape[0]
 
         t = self.time_embed(t)
-        x = self.x_proj(x) + self.position
-        context = self.context_proj(context) + self.position
+        x = self.x_proj(x) + self.pos_route
+        context = self.context_proj(context) + self.pos_traj
 
         x = rearrange(x, "B N L D -> B (N L) D")
         context = rearrange(context, "B N L D -> B (N L) D")
