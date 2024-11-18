@@ -1,4 +1,3 @@
-# LaDe Dataset: https://arxiv.org/abs/2306.10675
 import torch
 from .Utils import *
 from tqdm import tqdm

@@ -18,9 +18,13 @@ from Diffusion import DDIM
 
 def prepareModels() -> Dict[str, torch.nn.Module]:
     vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4, threshold=0.5).to(DEVICE)
+    loadModels("Runs/CDVAE/241105_2211_xydl/last.pth", vae=vae)
     vae.eval()
 
     DiT = PathsDiT(n_paths=N_TRAJS, l_path=L_PATH, d_context=2, n_layers=4, T=T).to(DEVICE)
+
+    torch.set_float32_matmul_precision("high")
+    torch.compile(DiT)
 
     # loadModels("Runs/SegmentsModel/20241029_021329_Use_Paths/last.pth", SegmentsModel=DiT, PathEncoder=traj_encoder)
     return {"DiT": DiT, "VAE": vae}
@@ -68,9 +72,9 @@ def train():
 
                 optimizer.zero_grad()
 
-                latent_pred = models["DiT"](latent_noisy, batch["trajs"], t)
+                latent_noise_pred = models["DiT"](latent_noisy, batch["trajs"], t)
 
-                loss = loss_func(latent_pred, latent)
+                loss = loss_func(latent_noise_pred, latent_noise) * 100
 
                 loss.backward()
 
