@@ -1,4 +1,4 @@
-from Dataset import LaDeCachedDataset
+from Dataset import RoadNetworkDataset
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.DiT.configs import *
 from TrainEvalTest.Utils import *
@@ -15,21 +15,21 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     :param vae: The VAE model
     :return: The figure and loss
     """
-    test_set = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="test")
-    test_loader = torch.utils.data.DataLoader(test_set, batch_size=B, collate_fn=LaDeCachedDataset.collate_fn, shuffle=False)
+    test_set = RoadNetworkDataset("Dataset/RoadsGetter/Tokyo_10k",
+                                 batch_size=B,
+                                 drop_last=True,
+                                 set_name="train",
+                                 enable_aug=True,
+                                 img_H=16,
+                                 img_W=16
+                                 )
 
-    batch = next(iter(test_loader))
+    batch = test_set[0:B]
 
     with torch.no_grad():
         latent, _ = vae.encode(batch["paths"])
 
     latent_noise = torch.randn_like(latent)
-
-    batch["duplicate_segs"] = torch.cat([batch["paths"][..., 1:, :], batch["paths"][..., :-1, :]],
-                                        dim=-1)  # (B, N, L-1, 4)
-    batch["duplicate_segs"] = batch["duplicate_segs"].view(B, -1, 4).contiguous()  # (B, N_segs, 4)
-    filter_mask = ~torch.any(batch["duplicate_segs"] == 0, dim=2, keepdim=True)
-    batch["duplicate_segs"] = batch["duplicate_segs"] * filter_mask
 
     def eval(models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
 
@@ -49,12 +49,12 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
 
         loss = torch.nn.functional.mse_loss(duplicate_segs, batch["duplicate_segs"])
 
-        plot_manager = PlotManager(5, 1, 5)
-        plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs")
-        plot_manager.plotTrajs(batch["trajs"][0], 0, 1, "Trajectories")
-        plot_manager.plotTrajs(batch["paths"][0], 0, 2, "Paths")
-        plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Dup Segs")
-        plot_manager.plotSegments(coi_means[0], 0, 4, "Pred Segs")
+        plot_manager = PlotManager(4, 1, 5)
+        plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
+        plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
+        plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
+        plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
+        plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
 
         for name in models:
             if is_training[name]:

@@ -56,14 +56,9 @@ class Block(nn.Module):
 
 
 class PathsDiT(nn.Module):
-    def __init__(self, n_paths: int, l_path: int, d_context: int, n_layers: int, T: int):
+    @cacheArgumentsUponInit
+    def __init__(self, D_in: int, N_routes: int, L_route: int, d_context: int, n_layers: int, T: int):
         super().__init__()
-
-        self.n_paths = n_paths
-        self.l_path = l_path
-        self.d_context = d_context
-        self.n_layers = n_layers
-        self.T = T
 
         self.time_embed = nn.Sequential(
             nn.Embedding(T, 128),
@@ -77,10 +72,10 @@ class PathsDiT(nn.Module):
 
         self.x_proj = nn.Sequential(
             Rearrange("B N L D", "(B N) D L"), # (BN, 2, L)
-            nn.Conv1d(4, 32, 3, 1, 1),
+            nn.Conv1d(D_in, 32, 3, 1, 1),
             Swish(),
             nn.Conv1d(32, 128, 3, 1, 1),
-            Rearrange("(B N) D L", "B N L D", N=n_paths)
+            Rearrange("(B N) D L", "B N L D", N=N_routes)
         )
 
         self.context_proj = nn.Sequential(
@@ -94,18 +89,18 @@ class PathsDiT(nn.Module):
             Conv1dBnAct(64, 128, 3, 2, 1),
             Res1D(128, 256, 128),
             Res1D(128, 256, 128),
-            Rearrange("(B N) D L", "B N L D", N=n_paths)
+            Rearrange("(B N) D L", "B N L D", N=N_routes)
         )
 
-        self.position = nn.Parameter(torch.randn(1, 1, l_path, 128))
+        self.position = nn.Parameter(torch.randn(1, 1, L_route, 128))
 
         self.stages = SequentialWithAdditionalInputs(
-            *[Block(n_paths, l_path, 128, 128, 128, 128, 8) for _ in range(n_layers)]
+            *[Block(N_routes, L_route, 128, 128, 128, 128, 8) for _ in range(n_layers)]
         )
 
         # (B, N, L, 128)
         self.head = nn.Sequential(
-            Rearrange("B (N L) D",  "B N L D", N=n_paths),
+            Rearrange("B (N L) D",  "B N L D", N=N_routes),
             nn.Linear(128, 32),
             Swish(),
             nn.Linear(32, 4)

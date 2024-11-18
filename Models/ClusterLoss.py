@@ -14,9 +14,8 @@ class ClusterLoss(nn.Module):
         return cluster_mat
 
     def forward(self, pred_seq, pred_cluster_mat: Tensor, target_seq: Tensor) -> Tensor:
-        # input_seq: (B, M, D)
-        # pred_cluster_mat: (B, M, M)
-        # target_seq: (B, N, D), N <= M
+        # pred_seg: (B, N_trajs*L_route, N_interp, 2)
+        # target_seq: (B, N_segs, N_interp, 2)
         B, M, D, _ = pred_seq.shape
 
         # Step 1. find the matching between input_seq and target_seq

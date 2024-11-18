@@ -11,17 +11,17 @@ from torch.utils.data import DataLoader
 
 import os
 
-from Dataset import DEVICE, LaDeCachedDataset
+from Dataset import DEVICE, RoadNetworkDataset
 from Models import PathsDiT, CrossDomainVAE
 from Diffusion import DDIM
 
 
-def prepareModels() -> Dict[str, torch.nn.Module]:
-    vae = CrossDomainVAE(N_paths=N_TRAJS, L_path=L_PATH, D_enc=4, threshold=0.5).to(DEVICE)
+def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
+    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
     loadModels("Runs/CDVAE/241105_2211_xydl/last.pth", vae=vae)
     vae.eval()
 
-    DiT = PathsDiT(n_paths=N_TRAJS, l_path=L_PATH, d_context=2, n_layers=4, T=T).to(DEVICE)
+    DiT = PathsDiT(D_in=dataset.N_interp*2, N_routes=dataset.N_trajs, L_route=dataset.max_L_route, d_context=2, n_layers=4, T=T).to(DEVICE)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(DiT)
@@ -32,11 +32,17 @@ def prepareModels() -> Dict[str, torch.nn.Module]:
 
 def train():
     # Dataset & DataLoader
-    dataset = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="train")
-    dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
+    dataset = RoadNetworkDataset("Dataset/RoadsGetter/Tokyo_10k",
+                                 batch_size=B,
+                                 drop_last=True,
+                                 set_name="train",
+                                 enable_aug=True,
+                                 img_H=16,
+                                 img_W=16
+                                 )
 
     # Models
-    models = prepareModels()
+    models = prepareModels(dataset)
 
     eval = getEvalFunction(models["VAE"])
 
@@ -52,18 +58,18 @@ def train():
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR)
     writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_loss = MovingAvg(MOV_AVG_LEN * len(dataloader))
+    mov_avg_loss = MovingAvg(MOV_AVG_LEN * len(dataset))
     global_step = 0
     best_loss = float("inf")
 
-    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
+    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
-            for i, batch in enumerate(dataloader):
+            for i, batch in enumerate(dataset):
                 batch: Dict[str, Tensor]
 
                 with torch.no_grad():
-                    latent, _ = models["VAE"].encode(batch["paths"])    # (B, N, L, 4)
+                    latent, _ = models["VAE"].encode(batch["paths"])    # (B, N_trajs, L_route, N_interp*2)
 
                 latent_noise = torch.randn_like(latent)
 
@@ -79,7 +85,7 @@ def train():
                 loss.backward()
 
                 # Gradient Clipping
-                # torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.2)
+                torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.0)
 
                 optimizer.step()
 

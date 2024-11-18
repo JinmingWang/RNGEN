@@ -105,7 +105,7 @@ def train():
             plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
             plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
             plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
-            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs",)
+            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 
