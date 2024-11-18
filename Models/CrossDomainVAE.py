@@ -73,6 +73,8 @@ class CrossDomainVAE(nn.Module):
     def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
 
+        self.N_segs = N_routes * L_route
+
         # Input (B, N_trajs, L_route, N_interp, 2)
         self.encoder = nn.Sequential(
             Rearrange("B N_routes L_route N_interp D", "(B N_routes) (N_interp D) L_route"),
@@ -86,13 +88,16 @@ class CrossDomainVAE(nn.Module):
             *[Res1D(128, 256, 128) for _ in range(3)],
             Conv1dBnAct(128, 256, 1, 1, 0),
 
-            Rearrange("(B N_routes) D L_route", "B N_routes L_route D", N_routes=N_routes),
+            Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
+
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
+            AttentionBlock(self.N_segs, 256, 64, 512, 256, 8, 0.0),
+
+            Rearrange("B (N_routes L_route) D", "B N_routes L_route D", N_routes=N_routes),
         )
 
         self.mu_head = nn.Linear(256, 2 * N_interp)
         self.logvar_head = nn.Linear(256, 2 * N_interp)
-
-        self.N_segs = N_routes * L_route
 
         self.decoder_shared = nn.Sequential(
             Rearrange("B N_routes L_route D", "(B N_routes) D L_route"),
@@ -103,22 +108,22 @@ class CrossDomainVAE(nn.Module):
             nn.Conv1d(64, 128, 1, 1, 0),
             *[Res1D(128, 256, 128) for _ in range(3)],
 
-            nn.Conv1d(128, 256, 1, 1, 0),
+            nn.Conv1d(128, 384, 1, 1, 0),
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
-            *[AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0) for _ in range(4)],
+            *[AttentionBlock(self.N_segs, 384, 64, 768, 384, 8, 0.0) for _ in range(4)],
         )
 
         self.segs_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            nn.Linear(256, N_interp * 2),
+            AttentionBlock(self.N_segs, 384, 64, 768, 384, 8, 0.0),
+            AttentionBlock(self.N_segs, 384, 64, 768, 384, 8, 0.0),
+            nn.Linear(384, N_interp * 2),
         )
 
         self.cluster_head = nn.Sequential(
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            AttentionBlock(self.N_segs, 256, 64, 512, 256, 4, 0.0),
-            nn.Linear(256, 128),
+            AttentionBlock(self.N_segs, 384, 64, 768, 384, 8, 0.0),
+            AttentionBlock(self.N_segs, 384, 64, 768, 384, 8, 0.0),
+            nn.Linear(384, 128),
             Swish(),
             MultiHeadSelfRelationMatrix(128, 128, 16), # (B, L, L)
             nn.Sigmoid()

@@ -1,3 +1,5 @@
+import matplotlib.pyplot as plt
+
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.CrossDomainVAE.configs import *
 from TrainEvalTest.Utils import *
@@ -19,8 +21,8 @@ def train():
     # Dataset & DataLoader
     dataset = RoadNetworkDataset("Dataset/RoadsGetter",
                                  batch_size=B,
-                                 drop_last=False,
-                                 set_name="debug",
+                                 drop_last=True,
+                                 set_name="train",
                                  enable_aug=True,
                                  img_H=16,
                                  img_W=16
@@ -71,6 +73,9 @@ def train():
 
                 # Backpropagation
                 loss.backward()
+
+                torch.nn.utils.clip_grad_norm_(vae.parameters(), 1.0)
+
                 optimizer.step()
 
                 total_loss += loss
@@ -97,10 +102,10 @@ def train():
             #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
 
             # Plot reconstructed segments and graphs
-            plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes")
-            plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs")
-            plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs")
-            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
+            plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
+            plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
+            plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
+            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs",)
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 

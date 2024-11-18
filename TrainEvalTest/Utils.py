@@ -80,8 +80,8 @@ class PlotManager:
         # Extract the points for each line segment
         x_coords = segs.flatten(0, -3)[..., 0].cpu().detach().numpy()  # (N_segs, N_points)
         y_coords = segs.flatten(0, -3)[..., 1].cpu().detach().numpy()  # (N_segs, N_points)
-        for seg_i in range(len(segs)):
-            ax.plot(x_coords[seg_i], y_coords[seg_i], linestyle='-', alpha=0.5, color=color)
+        for seg_i in range(len(x_coords)):
+            ax.plot(x_coords[seg_i], y_coords[seg_i], linestyle='-', alpha=0.1, color=color)
             ax.scatter(x_coords[seg_i, 0], y_coords[seg_i, 0], marker='.', color=color, s=10)
             ax.scatter(x_coords[seg_i, -1], y_coords[seg_i, -1], marker='.', color=color, s=10)
 
