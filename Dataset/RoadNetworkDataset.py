@@ -2,6 +2,8 @@ import torch
 from .Utils import *
 from tqdm import tqdm
 import os
+import numpy as np
+import cv2
 
 
 class RoadNetworkDataset():
@@ -140,7 +142,7 @@ class RoadNetworkDataset():
             "L_route": self.L_route[idx].to(DEVICE),
             "N_segs": self.N_segs[idx].to(DEVICE),
             "mean_point": self.mean_norm[idx].to(DEVICE),
-            #"std_point": self.std_norm[idx].to(DEVICE),
+            "std_point": self.std_norm[idx].to(DEVICE),
             "bbox": self.bboxes[idx].to(DEVICE)
         }
 
@@ -250,39 +252,49 @@ class RoadNetworkDataset():
         return {"joints": joint_matrix.to(torch.float32)}
 
     @staticmethod
-    def getTargetHeatmaps(segs: Float[Tensor, "B N 5"], H: int, W: int, line_width: float = 2.0, supersample: int = 5) -> Dict[str, Float[Tensor, "B 1 H W"]]:
+    def getTargetHeatmaps(segs: Float[Tensor, "B N_segs N_interp 2"],
+                          bboxes: Float[Tensor, "B 4"],
+                          mean_point: Float[Tensor, "B 2"],
+                          std_point: Float[Tensor, "B 2"],
+                          H: int,
+                          W: int,
+                          line_width: int = 2) -> Dict[str, Float[Tensor, "B 1 H W"]]:
         """
         Compute the target heatmaps for the given segments
         :param segs: the segments tensor
+        :param bboxes: (min_lat, max_lat, min_lon, max_lon)
         :param H: the height of the heatmap
         :param W: the width of the heatmap
         :param line_width: the width of the line
-        :param supersample: the supersampling factor
         :return: the target heatmaps of shape (B, 1, H, W)
         """
 
-        B, N, _ = segs.shape
-        heatmaps = torch.zeros((B, 1, H, W), device=DEVICE, dtype=torch.float32)
-        src_points, dst_points, is_valid = torch.split(segs, [2, 2, 1], dim=2)
+        B = segs.shape[0]
 
-        is_valid = is_valid.bool().repeat(1, 1, 2)
+        heatmaps = np.zeros((B, 1, H, W), dtype=np.uint8)
 
-        # since src and dst are in range -3 to 3, we need to scale them to the heatmap size
-        HW = torch.tensor([H, W], device=DEVICE).float()
-        src_points = (src_points + 3) / 6 * HW
-        dst_points = (dst_points + 3) / 6 * HW
+        # normalize bboxes
+        bboxes[:, [0, 2]] = (bboxes[:, [0, 2]] - mean_point) / std_point
+        bboxes[:, [1, 3]] = (bboxes[:, [1, 3]] - mean_point) / std_point
 
-        s = supersample
-        for b in range(B):
-            heatmap = LaDeCachedDataset._gen_line_mask(
-                (H * s, W * s),
-                src_points[b][is_valid[b]].view(-1, 2) * s,
-                dst_points[b][is_valid[b]].view(-1, 2) * s,
-                line_width * s)
-            heatmap = reduce(heatmap.float(), "(h hs) (w ws) -> h w", "mean", hs=s, ws=s)
-            heatmaps[b, 0] = heatmap
+        for i in range(B):
+            # Get the bounding box of the segment
+            min_lat, max_lat, min_lon, max_lon = bboxes[i]
 
-        return {"target_heatmaps": heatmaps}
+            for j in range(segs.shape[1]):
+                lons = segs[i, j, :, 0].cpu().numpy()
+                lats = segs[i, j, :, 1].cpu().numpy()
+                # Normalize lons and lats to 0 - 1 using bboxes
+                lons = (lons - min_lon) / (max_lon - min_lon)
+                lats = (lats - min_lat) / (max_lat - min_lat)
+                # Convert to pixel coordinates
+                lons = (lons * W).astype(np.int32)
+                lats = (lats * H).astype(np.int32)
+                # Draw the polyline
+                cv2.polylines(heatmaps[i, 0], [np.stack([lons, lats], axis=1)], False, 255, thickness=line_width)
+
+
+        return {"target_heatmaps": torch.tensor(heatmaps, dtype=torch.float32, device=DEVICE)}
 
     @staticmethod
     def _gen_line_mask(shape: Tuple[int, int], src: Float[Tensor, "D=2"], dst: Float[Tensor, "D=2"], lw: float) -> Bool[Tensor, "H W"]:

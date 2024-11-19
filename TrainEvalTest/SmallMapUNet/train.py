@@ -10,14 +10,20 @@ from torch.utils.data import DataLoader
 
 import os
 
-from Dataset import DEVICE, LaDeCachedDataset
+from Dataset import DEVICE, RoadNetworkDataset
 from Models import UNet2D
 
 
 def train():
     # Dataset & DataLoader
-    dataset = LaDeCachedDataset(DATA_DIR, max_trajs=N_TRAJS, set_name="train")
-    dataloader = DataLoader(dataset, batch_size=B, shuffle=True, collate_fn=LaDeCachedDataset.collate_fn, drop_last=True)
+    dataset = RoadNetworkDataset("Dataset/RoadsGetter/Tokyo_10k",
+                                 batch_size=B,
+                                 drop_last=True,
+                                 set_name="train",
+                                 enable_aug=True,
+                                 img_H=16,
+                                 img_W=16
+                                 )
 
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
@@ -34,20 +40,24 @@ def train():
     if not os.path.exists(LOG_DIR):
         os.makedirs(LOG_DIR, exist_ok=True)
     writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_l1 = MovingAvg(MOV_AVG_LEN * len(dataloader))
-    mov_avg_l2 = MovingAvg(MOV_AVG_LEN * len(dataloader))
+    mov_avg_l1 = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_l2 = MovingAvg(MOV_AVG_LEN * len(dataset))
     global_step = 0
     best_loss = float("inf")
     plot_manager = PlotManager(4, 1, 4)
 
-    with ProgressManager(len(dataloader), EPOCHS, 5, 2, ["L1", "L2", "lr"]) as progress:
+    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["L1", "L2", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
-            for i, batch in enumerate(dataloader):
+            for i, batch in enumerate(dataset):
                 batch: Dict[str, torch.Tensor]
 
                 H, W = batch["heatmaps"].shape[-2:]
-                batch |= LaDeCachedDataset.getTargetHeatmaps(batch["segs"], H, W)
+                batch |= RoadNetworkDataset.getTargetHeatmaps(batch["segs"],
+                                                              batch["bboxes"],
+                                                              batch["mean_point"],
+                                                              batch["std_point"],
+                                                              H, W, 1)
 
                 # noise = torch.randn_like(batch["paths"])
                 # pred_func = lambda noisy_contents, t: [DiT(*noisy_contents, batch["trajs"], t)]
