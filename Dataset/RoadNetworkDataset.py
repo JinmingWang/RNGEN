@@ -12,6 +12,7 @@ class RoadNetworkDataset():
                  batch_size: int = 32,
                  drop_last: bool = True,
                  set_name: str = "train",
+                 permute_seq: bool = True,
                  enable_aug: bool = False,
                  img_H: int = 256,
                  img_W: int = 256) -> None:
@@ -27,6 +28,7 @@ class RoadNetworkDataset():
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.set_name = set_name
+        self.permute_seq = permute_seq
         self.enable_aug = enable_aug
         self.img_H = img_H
         self.img_W = img_W
@@ -122,15 +124,20 @@ class RoadNetworkDataset():
         trajs = self.trajs[idx].to(DEVICE)
         routes = self.routes[idx].to(DEVICE)
         segs = self.segs[idx].to(DEVICE)
+        L_traj = self.L_traj[idx].to(DEVICE)
+        L_route = self.L_route[idx].to(DEVICE)
 
-        # permute the order of the trajectories and routes
-        traj_perm = torch.randperm(trajs.shape[1])
-        trajs = trajs[:, traj_perm]
-        routes = routes[:, traj_perm]
+        if self.permute_seq:
+            # permute the order of the trajectories and routes
+            traj_perm = torch.randperm(trajs.shape[1])
+            trajs = trajs[:, traj_perm]
+            routes = routes[:, traj_perm]
+            L_traj = L_traj[:, traj_perm]
+            L_route = L_route[:, traj_perm]
 
-        # permute the order of the segments
-        segs_perm = torch.randperm(segs.shape[1])
-        segs = segs[:, segs_perm]
+            # permute the order of the segments
+            segs_perm = torch.randperm(segs.shape[1])
+            segs = segs[:, segs_perm]
 
         batch_data = {
             "trajs": trajs,
@@ -138,8 +145,8 @@ class RoadNetworkDataset():
             "segs": segs,
             "heatmap": self.heatmaps[idx].to(DEVICE),
             "image": self.images[idx].to(DEVICE),
-            "L_traj": self.L_traj[idx].to(DEVICE),
-            "L_route": self.L_route[idx].to(DEVICE),
+            "L_traj": L_traj,
+            "L_route": L_route,
             "N_segs": self.N_segs[idx].to(DEVICE),
             "mean_point": self.mean_norm[idx].to(DEVICE),
             "std_point": self.std_norm[idx].to(DEVICE),
@@ -252,10 +259,7 @@ class RoadNetworkDataset():
         return {"joints": joint_matrix.to(torch.float32)}
 
     @staticmethod
-    def getTargetHeatmaps(segs: Float[Tensor, "B N_segs N_interp 2"],
-                          bboxes: Float[Tensor, "B 4"],
-                          mean_point: Float[Tensor, "B 2"],
-                          std_point: Float[Tensor, "B 2"],
+    def getTargetHeatmaps(batch,
                           H: int,
                           W: int,
                           line_width: int = 2) -> Dict[str, Float[Tensor, "B 1 H W"]]:
@@ -269,29 +273,33 @@ class RoadNetworkDataset():
         :return: the target heatmaps of shape (B, 1, H, W)
         """
 
-        B = segs.shape[0]
+        B = batch["trajs"].shape[0]
 
-        heatmaps = np.zeros((B, 1, H, W), dtype=np.uint8)
-
-        # normalize bboxes
-        bboxes[:, [0, 2]] = (bboxes[:, [0, 2]] - mean_point) / std_point
-        bboxes[:, [1, 3]] = (bboxes[:, [1, 3]] - mean_point) / std_point
+        heatmaps = np.zeros((B, 1, H, W), dtype=np.float32)
 
         for i in range(B):
             # Get the bounding box of the segment
-            min_lat, max_lat, min_lon, max_lon = bboxes[i]
+            trajs = batch["trajs"][i]
+            L_traj = batch["L_traj"][i]
+            points = torch.cat([trajs[i, :L_traj[i]] for i in range(48)], dim=0)
+            min_point = torch.min(points, dim=0, keepdim=True).values
+            max_point = torch.max(points, dim=0, keepdim=True).values
+            point_range = max_point - min_point
 
-            for j in range(segs.shape[1]):
-                lons = segs[i, j, :, 0].cpu().numpy()
-                lats = segs[i, j, :, 1].cpu().numpy()
-                # Normalize lons and lats to 0 - 1 using bboxes
-                lons = (lons - min_lon) / (max_lon - min_lon)
-                lats = (lats - min_lat) / (max_lat - min_lat)
-                # Convert to pixel coordinates
-                lons = (lons * W).astype(np.int32)
-                lats = (lats * H).astype(np.int32)
+            segs = batch["segs"][i]     # (N_segs, N_interp, 2)
+            segs = segs[torch.all(segs.flatten(1) != 0, dim=1)]
+
+            segs = (segs - min_point.view(1, 1, 2)) / point_range.view(1, 1, 2)
+
+            segs[..., 0] *= W
+            segs[..., 1] *= H
+
+            for j in range(len(segs)):
+                lons = segs[j, :, 0].cpu().numpy().astype(np.int32)
+                lats = segs[j, :, 1].cpu().numpy().astype(np.int32)
                 # Draw the polyline
-                cv2.polylines(heatmaps[i, 0], [np.stack([lons, lats], axis=1)], False, 255, thickness=line_width)
+                cv2.polylines(heatmaps[i, 0], [np.stack([lons, lats], axis=1)], False,
+                              1.0, thickness=line_width)
 
 
         return {"target_heatmaps": torch.tensor(heatmaps, dtype=torch.float32, device=DEVICE)}

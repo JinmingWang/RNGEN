@@ -7,7 +7,6 @@ import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
 
 import os
 
@@ -17,11 +16,18 @@ from Diffusion import DDIM
 
 
 def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
-    loadModels("Runs/CDVAE/241105_2211_xydl/last.pth", vae=vae)
+    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+                         N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    loadModels("Runs/CDVAE/241117_1451_segs_130MB/last.pth", vae=vae)
     vae.eval()
 
-    DiT = PathsDiT(D_in=dataset.N_interp*2, N_routes=dataset.N_trajs, L_route=dataset.max_L_route, d_context=2, n_layers=4, T=T).to(DEVICE)
+    DiT = PathsDiT(D_in=dataset.N_interp*2,
+                   N_routes=dataset.N_trajs,
+                   L_route=dataset.max_L_route,
+                   L_traj=dataset.max_L_traj,
+                   d_context=2,
+                   n_layers=6,
+                   T=T).to(DEVICE)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(DiT)
@@ -32,7 +38,7 @@ def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/RoadsGetter/Tokyo_10k",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -69,7 +75,7 @@ def train():
                 batch: Dict[str, Tensor]
 
                 with torch.no_grad():
-                    latent, _ = models["VAE"].encode(batch["paths"])    # (B, N_trajs, L_route, N_interp*2)
+                    latent, _ = models["VAE"].encode(batch["routes"])    # (B, N_trajs, L_route, N_interp*2)
 
                 latent_noise = torch.randn_like(latent)
 

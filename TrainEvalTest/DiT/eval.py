@@ -15,7 +15,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     :param vae: The VAE model
     :return: The figure and loss
     """
-    test_set = RoadNetworkDataset("Dataset/RoadsGetter/Tokyo_10k",
+    test_set = RoadNetworkDataset("Dataset/Tokyo_10k",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -27,7 +27,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     batch = test_set[0:B]
 
     with torch.no_grad():
-        latent, _ = vae.encode(batch["paths"])
+        latent, _ = vae.encode(batch["routes"])
 
     latent_noise = torch.randn_like(latent)
 
@@ -47,7 +47,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
 
             duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
 
-        loss = torch.nn.functional.mse_loss(duplicate_segs, batch["duplicate_segs"])
+        loss = torch.nn.functional.mse_loss(duplicate_segs, batch["routes"].flatten(1, 2))
 
         plot_manager = PlotManager(4, 1, 5)
         plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")

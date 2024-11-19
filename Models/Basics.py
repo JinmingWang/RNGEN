@@ -335,7 +335,7 @@ class Res2D(nn.Module):
             nn.Conv2d(d_in, d_mid, 3, 1, 1),
             nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv2d(d_mid, d_mid, 1, 1, 0),
+            nn.Conv2d(d_mid, d_mid, 3, 1, 1),
             nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv2d(d_mid, d_out, 3, 1, 1)
@@ -344,7 +344,7 @@ class Res2D(nn.Module):
         torch.nn.init.zeros_(self.layers[-1].weight)
         torch.nn.init.zeros_(self.layers[-1].bias)
 
-        self.shortcut = nn.Identity() if d_in == d_out else nn.Conv1d(d_in, d_out, 1, 1, 0)
+        self.shortcut = nn.Identity() if d_in == d_out else nn.Conv2d(d_in, d_out, 1, 1, 0)
 
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
