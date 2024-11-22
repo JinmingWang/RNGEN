@@ -2,7 +2,7 @@ from Dataset import RoadNetworkDataset
 from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.DiT.configs import *
 from TrainEvalTest.Utils import *
-from Models import PathsDiT, CrossDomainVAE
+from Models import RoutesDiT, CrossDomainVAE
 from Diffusion import DDIM
 
 from typing import Callable

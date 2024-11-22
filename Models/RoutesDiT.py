@@ -20,10 +20,8 @@ class Block(nn.Module):
         self.dropout = dropout
 
         self.time_proj = nn.Sequential(
-            nn.Linear(d_time, d_time),
-            Swish(),
             nn.Linear(d_time, d_in),
-            nn.Unflatten(-1, (1, -1))
+            Swish()
         )
 
         d_mid = d_in + d_context
@@ -31,7 +29,6 @@ class Block(nn.Module):
             Rearrange("B (N L) D", "(B N) D L", N=n_paths),
             Res1D(d_mid, d_mid*2, d_mid),
             Res1D(d_mid, d_mid*2, d_mid),
-            Swish(),
             nn.Conv1d(d_mid, d_out, 3, 1, 1),
             Rearrange("(B N) D L", "B (N L) D", N=n_paths)
         )
@@ -42,7 +39,7 @@ class Block(nn.Module):
             d_head=d_out // 4,
             d_expand=d_out * 2,
             d_out=d_out,
-            d_time=d_time,
+            d_time=d_in,
             n_heads=self.n_heads,
             dropout=self.dropout
         )
@@ -51,21 +48,22 @@ class Block(nn.Module):
         # x: (B, N, L, D)
         # context: (B, N, L, D')
         x = self.res(torch.cat([x, context], dim=-1))   # (B, N, L, D)
-        x = self.attn(x, t)
+        x = self.attn(x, self.time_proj(t))
         return x
 
 
-class PathsDiT(nn.Module):
+class RoutesDiT(nn.Module):
     @cacheArgumentsUponInit
     def __init__(self, D_in: int, N_routes: int, L_route: int, L_traj: int, d_context: int, n_layers: int, T: int):
         super().__init__()
 
         self.time_embed = nn.Sequential(
             nn.Embedding(T, 128),
-            nn.Linear(128, 128),
+            nn.Linear(128, 256),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(128, 128),
+            nn.Linear(256, 512),
             nn.LeakyReLU(inplace=True),
+            nn.Unflatten(-1, (1, -1))
         )
 
         # Input: (B, N, L, 2)
@@ -82,24 +80,19 @@ class PathsDiT(nn.Module):
 
         self.context_proj = nn.Sequential(
             Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
-            nn.Conv1d(d_context, 32, 3, 1, 1),
+            nn.Conv1d(d_context, 32, 3, 2, 1),
             Swish(),
-            Conv1dBnAct(32, 64, 3, 2, 1),
-            Res1D(64, 128, 64),
-            Res1D(64, 128, 64),
+            Conv1dNormAct(32, 128, 3, 2, 1),
+            *[Res1D(128, 256, 128) for _ in range(4)],
 
-            Conv1dBnAct(64, 128, 3, 2, 1),
-            Res1D(128, 256, 128),
-            Res1D(128, 256, 128),
-
-            Conv1dBnAct(128, 256, 3, 2, 1),
+            Conv1dNormAct(128, 256, 3, 2, 1),
             Rearrange("(B N) D L", "B N L D", N=N_routes)
         )
 
         self.pos_traj = nn.Parameter(torch.randn(1, 1, L_traj//8, 256))
 
         self.stages = SequentialWithAdditionalInputs(
-            *[Block(N_routes, L_route, 128, 128, 256, 128, 8) for _ in range(n_layers)]
+            *[Block(N_routes, L_route, 128, 128, 256, 512, 8) for _ in range(n_layers)]
         )
 
         # (B, N, L, 128)

@@ -19,7 +19,7 @@ from Models import CrossDomainVAE, ClusterLoss, KLLoss
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/RoadsGetter",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -29,6 +29,8 @@ def train():
                                  )
 
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+
+    loadModels("Runs/CDVAE/241121_1618_final/last.pth", vae=vae)
 
     cluster_loss_func = ClusterLoss()
     rec_loss_func = torch.nn.MSELoss()

@@ -79,9 +79,8 @@ def train():
                 H, W = batch["heatmap"].shape[-2:]
                 batch |= RoadNetworkDataset.getTargetHeatmaps(batch, H, W, 1)
 
-                # noise = torch.randn_like(batch["paths"])
-                # pred_func = lambda noisy_contents, t: [DiT(*noisy_contents, batch["trajs"], t)]
-                # pred_paths = ddim.diffusionBackward([noise], pred_func, mode="eps")[0]
+                batch = TEMP_fix_heatmap(batch)
+
                 optimizer.zero_grad()
 
                 pred_1 = stage_1(batch["heatmap"])

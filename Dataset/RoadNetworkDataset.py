@@ -21,7 +21,7 @@ class RoadNetworkDataset():
         The cache file is created by using LaDeDatasetCacheGenerator class
         :param path: the path to the cache file
         :param max_trajs: the maximum number of trajectories to use
-        :param set_name: the name of the set, either "train" or "test"
+        :param set_name: the name of the set, can be "train", "test", "debug" or "all"
         """
         print("Loading RoadNetworkDataset")
 
@@ -44,6 +44,8 @@ class RoadNetworkDataset():
             slicing = slice(int(data_count * 0.1), None)
         elif set_name == "debug":
             slicing = slice(300)
+        elif set_name == "all":
+            slicing = slice(data_count)
 
         # Data Loading
 
@@ -305,32 +307,5 @@ class RoadNetworkDataset():
         return {"target_heatmaps": torch.tensor(heatmaps, dtype=torch.float32, device=DEVICE)}
 
     @staticmethod
-    def _gen_line_mask(shape: Tuple[int, int], src: Float[Tensor, "D=2"], dst: Float[Tensor, "D=2"], lw: float) -> Bool[Tensor, "H W"]:
-        device = src.device
-
-        # Generate a pixel grid.
-        h, w = shape
-        x = torch.arange(w, device=device) + 0.5
-        y = torch.arange(h, device=device) + 0.5
-        xy = torch.stack(torch.meshgrid(x, y, indexing="xy"), dim=-1)
-
-        # Define a vector between the start and end points.
-        delta = dst - src
-        delta_norm = delta.norm(dim=-1, keepdim=True)
-        u_delta = delta / delta_norm
-
-        # Define a vector between each pixel and the start point.
-        indicator = xy - src[:, None, None]
-
-        # Determine whether each pixel is inside the line in the parallel direction.
-        # indicator: (L, H, W, 2)
-        # u_delta: (L, 2)
-        parallel = (indicator * u_delta.view(-1, 1, 1, 2)).sum(dim=-1)
-        parallel_inside_line = (parallel <= delta_norm[..., None]) & (parallel > 0)
-
-        # Determine whether each pixel is inside the line in the perpendicular direction.
-        perpendicular = indicator - parallel[..., None] * u_delta[:, None, None]
-        perpendicular_inside_line = perpendicular.norm(dim=-1) < (0.5 * lw)
-
-        return (parallel_inside_line & perpendicular_inside_line).any(dim=0)
-
+    def heatmapsToSegments(heatmaps: Float[Tensor, "B 1 H W"]):
+        pass

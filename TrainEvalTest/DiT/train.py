@@ -11,23 +11,23 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import PathsDiT, CrossDomainVAE
+from Models import RoutesDiT, CrossDomainVAE
 from Diffusion import DDIM
 
 
 def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                          N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
-    loadModels("Runs/CDVAE/241117_1451_segs_130MB/last.pth", vae=vae)
+    loadModels("Runs/CDVAE/241121_1618_final/last.pth", vae=vae)
     vae.eval()
 
-    DiT = PathsDiT(D_in=dataset.N_interp*2,
-                   N_routes=dataset.N_trajs,
-                   L_route=dataset.max_L_route,
-                   L_traj=dataset.max_L_traj,
-                   d_context=2,
-                   n_layers=6,
-                   T=T).to(DEVICE)
+    DiT = RoutesDiT(D_in=dataset.N_interp * 2,
+                    N_routes=dataset.N_trajs,
+                    L_route=dataset.max_L_route,
+                    L_traj=dataset.max_L_traj,
+                    d_context=2,
+                    n_layers=6,
+                    T=T).to(DEVICE)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(DiT)

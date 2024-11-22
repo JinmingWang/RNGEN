@@ -14,8 +14,27 @@ class Swish(nn.Module):
         return x * func.sigmoid(x)
 
 
+class FeatureNorm(nn.Module):
+    def __init__(self, num_features, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        # Learnable parameters for scaling and shifting
+        self.gamma = nn.Parameter(torch.ones(1, 1, num_features))
+        self.beta = nn.Parameter(torch.zeros(1, 1, num_features))
+
+    def forward(self, x):
+        # x is of shape (B, L, D)
+        mean = x.mean(dim=1, keepdim=True)  # Mean along the token dimension (L)
+        var = x.var(dim=1, keepdim=True, unbiased=False)  # Variance along L
+        # Normalize
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        # Apply learnable scale (gamma) and shift (beta)
+        return self.gamma * x_norm + self.beta
+
+
 class AttentionBlock(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int, dropout: float=0.1, mask: bool=False):
+    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int,
+                 dropout: float=0.0, mask: bool=False):
         super(AttentionBlock, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -26,7 +45,7 @@ class AttentionBlock(nn.Module):
         self.d_head = d_head
         self.d_in = d_in
         self.l_in = l_in
-        self.scale = d_head ** -0.5
+        self.scale = nn.Parameter(torch.tensor(d_head, dtype=torch.float32))
         self.dropout = nn.Dropout(dropout)
         self.mask = mask
 
@@ -71,15 +90,15 @@ class AttentionBlock(nn.Module):
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        attn = q @ kt * self.scale
+        score = q @ kt * (self.scale ** -0.5)
         if self.mask:
             upper_mask = torch.triu(torch.ones(1, N, N, device=x.device, dtype=torch.bool), diagonal=1)
-            attn = attn.masked_fill(upper_mask, float('-inf'))
-        attn = torch.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
+            score = score.masked_fill(upper_mask, float('-inf'))
+        score = torch.softmax(score, dim=-1)
+        score = self.dropout(score)
 
         # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        out = rearrange(torch.bmm(score, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
         return self.ff(x) + self.shortcut(x)
@@ -239,7 +258,7 @@ class CrossAttentionBlockWithTime(nn.Module):
 
 
 class AttentionWithTime(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, d_time: int, n_heads: int, dropout: float=0.1):
+    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, d_time: int, n_heads: int, dropout: float=0.0):
         super(AttentionWithTime, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -251,7 +270,7 @@ class AttentionWithTime(nn.Module):
         self.d_head = d_head
         self.d_in = d_in
         self.d_expand = d_expand
-        self.scale = d_head ** -0.5
+        self.scale = nn.Parameter(torch.tensor(d_head, dtype=torch.float32))
         self.d_time = d_time
         self.dropout = nn.Dropout(dropout)
 
@@ -273,12 +292,7 @@ class AttentionWithTime(nn.Module):
         torch.nn.init.zeros_(self.merge_head_proj.weight)
         torch.nn.init.zeros_(self.merge_head_proj.bias)
 
-        self.time_proj = nn.Sequential(
-            nn.Linear(d_time, d_time),
-            Swish(),
-            nn.Linear(d_time, d_in + d_expand),
-            nn.Unflatten(-1, (1, -1))
-        )
+        self.time_proj = nn.Linear(d_time, d_in + d_expand)
 
         self.ff1 = nn.Sequential(
             nn.LayerNorm(d_in),
@@ -306,11 +320,11 @@ class AttentionWithTime(nn.Module):
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        attn = torch.softmax(q @ kt * self.scale, dim=-1)
+        attn = torch.softmax(q @ kt * (self.scale  ** -0.5), dim=-1)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        out = rearrange(attn @ v, '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
         t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
@@ -355,13 +369,13 @@ class Res1D(nn.Module):
         super().__init__()
 
         self.layers = nn.Sequential(
-            nn.Conv1d(d_in, d_mid, 3, 1, 1),
+            nn.Conv1d(d_in, d_mid, 1, 1, 0),
             nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_mid, 3, 1, 1),
             nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv1d(d_mid, d_out, 3, 1, 1)
+            nn.Conv1d(d_mid, d_out, 1, 1, 0)
         )
 
         torch.nn.init.zeros_(self.layers[-1].weight)
@@ -372,20 +386,20 @@ class Res1D(nn.Module):
     def forward(self, x):
         return self.shortcut(x) + self.layers(x)
 
-class Conv2dBnAct(nn.Sequential):
+class Conv2dNormAct(nn.Sequential):
     def __init__(self, d_in: int, d_out: int, k: int, s: 1, p: 0):
         super().__init__(
             nn.Conv2d(d_in, d_out, k, s, p),
-            nn.BatchNorm2d(d_out),
+            nn.GroupNorm(8, d_out),
             Swish()
         )
 
 
-class Conv1dBnAct(nn.Sequential):
+class Conv1dNormAct(nn.Sequential):
     def __init__(self, d_in: int, d_out: int, k: int, s: 1, p: 0):
         super().__init__(
             nn.Conv1d(d_in, d_out, k, s, p),
-            nn.BatchNorm1d(d_out),
+            nn.GroupNorm(8, d_out),
             Swish()
         )
 

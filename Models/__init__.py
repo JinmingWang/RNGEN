@@ -5,7 +5,7 @@ from .ClusterLoss import ClusterLoss
 
 # Models
 from .NodeEdgeModel import NodeEdgeModel
-from .PathsDiT import PathsDiT
+from .RoutesDiT import RoutesDiT
 from .CrossDomainVAE import CrossDomainVAE
 from .UNet2D import UNet2D
 

@@ -3,7 +3,7 @@ from .Basics import *
 class ClusterLoss(nn.Module):
     def __init__(self):
         super(ClusterLoss, self).__init__()
-        self.base_loss = nn.BCELoss()
+        self.bce_loss = nn.BCELoss()
 
     def getClusterMat(self, target_seq: Tensor) -> Tensor:
         # target_seq: (B, N, D)
@@ -37,7 +37,7 @@ class ClusterLoss(nn.Module):
         # Step 3. get the cluster matrix of the matched target_seq
         target_cluster_mat = self.getClusterMat(matched_target_seq.flatten(2))
         # Step 4. calculate the loss
-        return self.base_loss(pred_cluster_mat, target_cluster_mat)
+        return self.bce_loss(pred_cluster_mat, target_cluster_mat)
 
 
     def getClusters(self, input_seq, cluster_mat):
