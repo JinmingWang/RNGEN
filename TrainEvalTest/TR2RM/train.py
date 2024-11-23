@@ -28,6 +28,9 @@ def train():
 
     model = AD_Linked_Net(d_in=4, H=256, W=256).to(DEVICE)
 
+    torch.set_float32_matmul_precision("high")
+    torch.compile(model)
+
     loss_func = torch.nn.BCELoss()
 
     # Optimizer & Scheduler
@@ -44,7 +47,7 @@ def train():
     best_loss = float("inf")
     plot_manager = PlotManager(4, 1, 4)
 
-    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["Loss""lr"]) as progress:
+    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
             for i, batch in enumerate(dataset):
@@ -79,7 +82,7 @@ def train():
 
             # Plot reconstructed segments and graphs
             plot_manager.plotHeatmap(batch["heatmap"][0], 0, 0, "Input")
-            plot_manager.plotHeatmap(batch["image"][0], 0, 1, "Image")
+            plot_manager.plotRGB(batch["image"][0], 0, 1, "Image")
             plot_manager.plotHeatmap(batch["target_heatmaps"][0], 0, 2, "Target")
             plot_manager.plotHeatmap(pred_heatmap[0], 0, 3, "Prediction")
 

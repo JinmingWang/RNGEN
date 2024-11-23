@@ -14,6 +14,7 @@ class RoadNetworkDataset():
                  set_name: str = "train",
                  permute_seq: bool = True,
                  enable_aug: bool = False,
+                 shuffle:bool = True,
                  img_H: int = 256,
                  img_W: int = 256) -> None:
         """
@@ -30,6 +31,7 @@ class RoadNetworkDataset():
         self.set_name = set_name
         self.permute_seq = permute_seq
         self.enable_aug = enable_aug
+        self.shuffle = shuffle
         self.img_H = img_H
         self.img_W = img_W
 
@@ -161,7 +163,10 @@ class RoadNetworkDataset():
 
 
     def __iter__(self):
-        shuffled_indices = torch.randperm(self.N_data)
+        if self.shuffle:
+            shuffled_indices = torch.randperm(self.N_data)
+        else:
+            shuffled_indices = torch.arange(self.N_data)
 
         if self.drop_last:
             end = self.N_data - self.N_data % self.batch_size

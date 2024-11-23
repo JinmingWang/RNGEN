@@ -16,20 +16,23 @@ class UNet2D(nn.Module):
         """
         super(UNet2D, self).__init__()
 
-        self.stem = Conv2dNormAct(1, 16, 3, 1, 1)     # (32, 256, 256)
+        self.stem = nn.Sequential(
+            nn.Conv2d(1, 8, 3, 1, 1),
+            Swish()
+        )
 
-        self.enc1 = self.getStage(16, 32, "down")   # (64, 128, 128)
-        self.enc2 = self.getStage(32, 64, "down")  # (128, 64, 64)
+        self.enc1 = self.getStage(8, 32, "down")
+        self.enc2 = self.getStage(32, 64, "down")
 
-        self.neck = self.getStage(64, 64, "same")    # (256, 64, 64)
+        self.neck = self.getStage(64, 64, "same")
 
         # After skip connection: (128+128, 64, 64)
 
-        self.dec1 = self.getStage(128, 32, "up")   # (64, 128, 128)
-        self.dec2 = self.getStage(32, 16, "up")    # (32, 256, 256)
+        self.dec1 = self.getStage(128, 32, "up")
+        self.dec2 = self.getStage(32, 8, "up")
 
         self.head = nn.Sequential(
-            nn.Conv2d(16, 1, 1),
+            nn.Conv2d(8, 1, 1),
             nn.Sigmoid()
         )
 
@@ -37,19 +40,19 @@ class UNet2D(nn.Module):
         """
         A stage in the UNet architecture
         """
-        if scaling == "same":
-            recale = nn.Identity()
-        elif scaling == "down":
-            recale = nn.MaxPool2d(2)
-        else:
-            recale = nn.UpsamplingNearest2d(scale_factor=2)
 
         d_mid = d_in * self.expansion
-        return nn.Sequential(
-            recale,
+        layers = nn.Sequential(
             *[Res2D(d_in, d_mid, d_in) for _ in range(self.n_repeats)],
             Conv2dNormAct(d_in, d_out, 1, 1, 0),
         )
+
+        if scaling == "down":
+            layers.insert(0, nn.MaxPool2d(2))
+        elif scaling == "up":
+            layers.append(nn.UpsamplingNearest2d(scale_factor=2))
+
+        return layers
 
     def forward(self, x):
         x = self.stem(x)

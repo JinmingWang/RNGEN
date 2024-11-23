@@ -14,29 +14,6 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import UNet2D
 
 
-
-def TEMP_fix_heatmap(batch):
-    for i in range(B):
-        trajs = batch["trajs"][i]
-        L_traj = batch["L_traj"][i]
-        points = torch.cat([trajs[i, :L_traj[i]] for i in range(48)], dim=0)
-        min_point = torch.min(points, dim=0, keepdim=True).values
-        max_point = torch.max(points, dim=0, keepdim=True).values
-        point_range = max_point - min_point
-
-        norm_points = (points - min_point) / point_range
-
-        _, _, h, w = batch["heatmap"].shape
-        x_ids = (norm_points[:, 0] * (w - 1)).long()
-        y_ids = (norm_points[:, 1] * (h - 1)).long()
-        heatmap_flat = torch.zeros(h * w, dtype=torch.float32, device="cuda")
-        flat_indices = y_ids * w + x_ids
-        heatmap_flat.scatter_add_(0, flat_indices, torch.ones_like(flat_indices, dtype=torch.float32))
-        batch["heatmap"][i, 0] = heatmap_flat.view(h, w)
-    return batch
-
-
-
 def train():
     # Dataset & DataLoader
     dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
@@ -52,6 +29,9 @@ def train():
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
 
+    torch.set_float32_matmul_precision("high")
+    torch.compile(stage_1)
+    torch.compile(stage_2)
 
     loss_func = torch.nn.BCELoss()
 
@@ -78,8 +58,6 @@ def train():
 
                 H, W = batch["heatmap"].shape[-2:]
                 batch |= RoadNetworkDataset.getTargetHeatmaps(batch, H, W, 1)
-
-                batch = TEMP_fix_heatmap(batch)
 
                 optimizer.zero_grad()
 
