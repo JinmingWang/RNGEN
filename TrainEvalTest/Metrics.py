@@ -85,15 +85,15 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
 
         mae = torch.abs(matched_pred_segs - matched_target_segs).mean().item()
 
-        mse = ((matched_pred_segs - matched_target_segs) ** 2).mean()
+        mse = ((matched_pred_segs - matched_target_segs) ** 2).mean().item()
 
         if len(unmatched_pred_segs) > 0:
             mae += unmatched_pred_segs.abs().mean().item()
-            mse += (unmatched_pred_segs ** 2).mean()
+            mse += (unmatched_pred_segs ** 2).mean().item()
 
         if len(unmatched_target_segs) > 0:
             mae += unmatched_target_segs.abs().mean().item()
-            mse += (unmatched_target_segs ** 2).mean()
+            mse += (unmatched_target_segs ** 2).mean().item()
 
         mae_list.append(mae)
         mse_list.append(mse)
@@ -276,11 +276,14 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
             torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32,
                          device=pred_heatmaps.device))
 
-        # Normalize segments to 0-1
-        max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
-        min_point = torch.min(segs[-1].flatten(0, 1), dim=0).values
-        point_range = max_point - min_point
-        segs[-1] = ((segs[-1] - min_point) / point_range)
+        try:
+            # Normalize segments to 0-1
+            max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
+            min_point = torch.min(segs[-1].flatten(0, 1), dim=0).values
+            point_range = max_point - min_point
+            segs[-1] = ((segs[-1] - min_point) / point_range)
+        except:
+            return None
 
     return segs
 

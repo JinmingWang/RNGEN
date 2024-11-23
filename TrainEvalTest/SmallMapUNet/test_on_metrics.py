@@ -53,9 +53,11 @@ def test():
 
             pred_segs = heatmapsToSegments(pred_2)
             if pred_segs is None:
-                batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], torch.zeors_like(norm_segs), norm_segs)
+                batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], torch.zeros_like(norm_segs), norm_segs)
             else:
                 batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], pred_segs, norm_segs)
+
+            batch_scores = np.array(batch_scores).T
 
             for scores in batch_scores:
                 f.write(name + ",")

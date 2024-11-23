@@ -1,5 +1,6 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import numpy as np
 
 report = pd.read_csv("Report.csv")
 
@@ -18,7 +19,8 @@ model_names = report["name"].unique()
 for i, title in enumerate(titles):
     axes[i].set_title(title)
     # violin plot
-    model_data = [report[report["name"] == name][title].values for name in model_names]
+
+    model_data = [np.array(report[report["name"] == name][title].values) for name in model_names]
     parts = axes[i].violinplot(model_data, showmeans=True, showmedians=True, showextrema=False)
     for j, pc in enumerate(parts['bodies']):
         pc.set_facecolor(colors[j])
