@@ -11,7 +11,7 @@ from Models import UNet2D
 
 def test():
     dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
-                                 batch_size=10,
+                                 batch_size=100,
                                  drop_last=True,
                                  set_name="test",
                                  permute_seq=False,

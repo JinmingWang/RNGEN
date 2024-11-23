@@ -29,6 +29,8 @@ for i, title in enumerate(titles):
 
 plt.tight_layout()
 
+plt.savefig("report.png", dpi=100)
+
 plt.show()
 
 
