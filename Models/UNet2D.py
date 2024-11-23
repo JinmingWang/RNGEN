@@ -16,7 +16,7 @@ class UNet2D(nn.Module):
         """
         super(UNet2D, self).__init__()
 
-        self.stem = Conv2dBnAct(1, 16, 3, 1, 1)     # (32, 256, 256)
+        self.stem = Conv2dNormAct(1, 16, 3, 1, 1)     # (32, 256, 256)
 
         self.enc1 = self.getStage(16, 32, "down")   # (64, 128, 128)
         self.enc2 = self.getStage(32, 64, "down")  # (128, 64, 64)
@@ -38,17 +38,17 @@ class UNet2D(nn.Module):
         A stage in the UNet architecture
         """
         if scaling == "same":
-            final_layer = nn.Identity()
+            recale = nn.Identity()
         elif scaling == "down":
-            final_layer = nn.MaxPool2d(2)
+            recale = nn.MaxPool2d(2)
         else:
-            final_layer = nn.UpsamplingNearest2d(scale_factor=2)
+            recale = nn.UpsamplingNearest2d(scale_factor=2)
 
         d_mid = d_in * self.expansion
         return nn.Sequential(
+            recale,
             *[Res2D(d_in, d_mid, d_in) for _ in range(self.n_repeats)],
-            Conv2dBnAct(d_in, d_out, 1, 1, 0),
-            final_layer
+            Conv2dNormAct(d_in, d_out, 1, 1, 0),
         )
 
     def forward(self, x):

@@ -8,6 +8,23 @@ from inspect import getfullargspec
 
 Tensor = torch.Tensor
 
+class FeatureNorm(nn.Module):
+    def __init__(self, num_features, eps=1e-5):
+        super().__init__()
+        self.eps = eps
+        # Learnable parameters for scaling and shifting
+        self.gamma = nn.Parameter(torch.ones(1, 1, num_features))
+        self.beta = nn.Parameter(torch.zeros(1, 1, num_features))
+
+    def forward(self, x):
+        # x is of shape (B, L, D)
+        mean = x.mean(dim=1, keepdim=True)  # Mean along the token dimension (L)
+        var = x.var(dim=1, keepdim=True, unbiased=False)  # Variance along L
+        # Normalize
+        x_norm = (x - mean) / torch.sqrt(var + self.eps)
+        # Apply learnable scale (gamma) and shift (beta)
+        return self.gamma * x_norm + self.beta
+
 
 class Swish(nn.Module):
     def forward(self, x):
