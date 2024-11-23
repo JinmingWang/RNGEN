@@ -4,6 +4,7 @@ from TrainEvalTest.Utils import *
 from TrainEvalTest.Metrics import *
 from Diffusion import DDIM
 from tqdm import tqdm
+import cv2
 
 import torch
 
@@ -13,7 +14,41 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import CrossDomainVAE, RoutesDiT
 
 
+def segsToHeatmaps(batch_segs: Tensor, trajs: Tensor, traj_lens: Tensor, img_H: int, img_W: int, line_width: int):
+    # segs: B * (N_segs, N_interp, 2)
+    B = len(batch_segs)
 
+    heatmaps = []
+
+    for i in range(B):
+        # Get the bounding box of the segment
+        trajs = trajs[i]
+        L_traj = traj_lens[i]
+        points = torch.cat([trajs[i, :L_traj[i]] for i in range(48)], dim=0)
+        min_point = torch.min(points, dim=0, keepdim=True).values
+        max_point = torch.max(points, dim=0, keepdim=True).values
+        point_range = max_point - min_point
+
+        segs = segs[i]  # (N_segs, N_interp, 2)
+        segs = segs[torch.all(segs.flatten(1) != 0, dim=1)]
+
+        segs = (segs - min_point.view(1, 1, 2)) / point_range.view(1, 1, 2)
+
+        segs[..., 0] *= img_W
+        segs[..., 1] *= img_H
+
+        heatmap = np.zeros((1, img_H, img_W), dtype=np.float32)
+
+        for j in range(len(segs)):
+            lons = segs[j, :, 0].cpu().numpy().astype(np.int32)
+            lats = segs[j, :, 1].cpu().numpy().astype(np.int32)
+            # Draw the polyline
+            cv2.polylines(heatmap[0], [np.stack([lons, lats], axis=1)], False,
+                          1.0, thickness=line_width)
+
+        heatmaps.append(torch.tensor(heatmap))
+
+    return torch.stack(heatmaps, dim=0).to(DEVICE)
 
 
 def test():
@@ -81,8 +116,7 @@ def test():
             for i in range(len(coi_means)):
                 coi_means[i] = ((coi_means[i]- min_point) / point_range)
 
-            # TODO: Generate heatmap from seqs
-            pred_heatmaps = None
+            pred_heatmaps = segsToHeatmaps(norm_pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 1)
             batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"], coi_means, norm_segs)
 
             batch_scores = np.array(batch_scores).T
