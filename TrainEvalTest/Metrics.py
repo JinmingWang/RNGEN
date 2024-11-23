@@ -250,8 +250,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
 def reportAllMetrics(pred_heatmap: F32[Tensor, "B 1 H W"],
                      target_heatmap: F32[Tensor, "B 1 H W"],
                      batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
-                     batch_target_segs: List[F32[Tensor, "Q N_interp 2"]],
-                     log_path: str = "report.csv") -> Tuple[str, str]:
+                     batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[str, str]:
     """
     Compute all metrics for road network prediction
 
@@ -266,14 +265,7 @@ def reportAllMetrics(pred_heatmap: F32[Tensor, "B 1 H W"],
     hungarian_mae, hungarian_mse = hungarianMetric(batch_pred_segs, batch_target_segs)
     chamfer_mae, chamfer_mse = chamferMetric(batch_pred_segs, batch_target_segs)
 
-    write_title = not os.path.exists(log_path)
-
     title = "heatmap_accuracy,heatmap_precision,heatmap_recall,heatmap_f1,hungarian_mae,hungarian_mse,chamfer_mae,chamfer_mse\n"
     content = f"{heatmap_accuracy},{heatmap_precision},{heatmap_recall},{heatmap_f1},{hungarian_mae},{hungarian_mse},{chamfer_mae},{chamfer_mse}\n"
-
-    with open(log_path, "a") as f:
-        if write_title:
-            f.write(title)
-        f.write(content)
 
     return title, content
