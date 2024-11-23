@@ -41,9 +41,9 @@ class RoadNetworkDataset():
         self.trajs = dataset["trajs"]
         data_count = len(self.trajs)
         if set_name == "train":
-            slicing = slice(int(data_count * 0.9))
+            slicing = slice(data_count - 1000)
         elif set_name == "test":
-            slicing = slice(int(data_count * 0.1), None)
+            slicing = slice(data_count - 1000, None)
         elif set_name == "debug":
             slicing = slice(300)
         elif set_name == "all":

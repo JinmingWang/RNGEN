@@ -135,6 +135,21 @@ class PlotManager:
 
         ax.axis('off')
 
+
+    def plotRGB(self, image, row, col, title):
+        """
+        Plot a heatmap given a tensor of shape (C, H, W), where H is the height and W is the width.
+        A colorbar is added, and the origin is set to 'lower' by default.
+        """
+        ax = self.axs[row, col]
+        ax.clear()  # Clear previous content
+        ax.set_title(title, fontsize=14, color='darkred')
+
+        cax = ax.imshow(image.permute(1, 2, 0).cpu().detach().numpy(), origin='lower')
+
+        ax.axis('off')
+
+
     def plotNodesWithAdjMat(self, nodes, adj_mat, row, col, title):
         """
         Plot nodes and their connections based on the adjacency matrix.
