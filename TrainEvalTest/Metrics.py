@@ -13,9 +13,10 @@ import networkx as nx
 
 Tensor = torch.Tensor
 
+
 def heatmapMetric(pred_heatmap: F32[Tensor, "B 1 H W"],
-                     target_heatmap: F32[Tensor, "B 1 H W"],
-                     threshold: float = 0.5) -> Tuple[float, ...]:
+                  target_heatmap: F32[Tensor, "B 1 H W"],
+                  threshold: float = 0.5) -> Tuple[List[float], List[float], List[float], List[float]]:
     """
     Compute the scores between road network projected to 2D (heatmaps)
 
@@ -24,20 +25,32 @@ def heatmapMetric(pred_heatmap: F32[Tensor, "B 1 H W"],
     :param threshold: threshold for binarization
     :return: accuracy, precision, recall, f1
     """
-    B, N, _ = pred_heatmap.shape
-    pred_flatten = pred_heatmap.view(B, -1).cpu().numpy() > threshold
-    target_flatten = target_heatmap.view(B, -1).cpu().numpy()
+    B = pred_heatmap.shape[0]
 
-    accuracy = accuracy_score(target_flatten, pred_flatten)
-    precision = precision_score(target_flatten, pred_flatten)
-    recall = recall_score(target_flatten, pred_flatten)
-    f1 = f1_score(target_flatten, pred_flatten)
+    batch_accuracy = []
+    batch_precision = []
+    batch_recall = []
+    batch_f1 = []
 
-    return accuracy, precision, recall, f1
+    pred_flatten = np.int32(pred_heatmap.view(B, -1).cpu().numpy() > threshold)
+    target_flatten = np.int32(target_heatmap.view(B, -1).cpu().numpy() > threshold)
+
+    for b in range(B):
+        accuracy = accuracy_score(target_flatten[b], pred_flatten[b])
+        precision = precision_score(target_flatten[b], pred_flatten[b])
+        recall = recall_score(target_flatten[b], pred_flatten[b])
+        f1 = f1_score(target_flatten[b], pred_flatten[b])
+
+        batch_accuracy.append(accuracy)
+        batch_precision.append(precision)
+        batch_recall.append(recall)
+        batch_f1.append(f1)
+
+    return batch_accuracy, batch_precision, batch_recall, batch_f1
 
 
 def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
-                    batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[float, float]:
+                    batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[List[float], List[float]]:
     """
     Find hungarian matching between predicted and target segments.
     Then compute MAE and MSE between matched segments.
@@ -50,12 +63,12 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
     """
 
     B = len(batch_pred_segs)
-    mae = 0
-    mse = 0
+    mae_list = []
+    mse_list = []
 
     for b in range(B):
-        pred_segs = batch_pred_segs[b].flatten(1)   # (P, N_interp*2)
-        target_segs = batch_target_segs[b].flatten(1)   # (Q, N_interp*2)
+        pred_segs = batch_pred_segs[b].flatten(1)  # (P, N_interp*2)
+        target_segs = batch_target_segs[b].flatten(1)  # (Q, N_interp*2)
         cost_matrix = torch.cdist(pred_segs, target_segs, p=2).cpu().detach().numpy()  # (P, Q)
 
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -65,23 +78,31 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         matched_target_segs = target_segs[col_ind]
 
         # Unmatched segments, The match target will be 0 if the segment is unmatched
-        unmatched_pred_segs = np.delete(pred_segs, row_ind, axis=0)
-        unmatched_target_segs = np.delete(target_segs, col_ind, axis=0)
+        unmatched_rows = [i for i in range(pred_segs.shape[0]) if i not in row_ind]
+        unmatched_cols = [i for i in range(target_segs.shape[0]) if i not in col_ind]
+        unmatched_pred_segs = pred_segs[unmatched_rows]
+        unmatched_target_segs = target_segs[unmatched_cols]
 
-        # Compute MAE and MSE
-        mae += (np.abs(matched_pred_segs - matched_target_segs).mean() +
-                np.abs(unmatched_pred_segs).mean() +
-                np.abs(unmatched_target_segs).mean())
+        mae = torch.abs(matched_pred_segs - matched_target_segs).mean().item()
 
-        mse += ((np.abs(matched_pred_segs - matched_target_segs) ** 2).mean() +
-                (np.abs(unmatched_pred_segs) ** 2).mean() +
-                (np.abs(unmatched_target_segs) ** 2).mean())
+        mse = ((matched_pred_segs - matched_target_segs) ** 2).mean()
 
-    return mae / B, mse / B
+        if len(unmatched_pred_segs) > 0:
+            mae += unmatched_pred_segs.abs().mean().item()
+            mse += (unmatched_pred_segs ** 2).mean()
+
+        if len(unmatched_target_segs) > 0:
+            mae += unmatched_target_segs.abs().mean().item()
+            mse += (unmatched_target_segs ** 2).mean()
+
+        mae_list.append(mae)
+        mse_list.append(mse)
+
+    return mae_list, mse_list
 
 
 def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
-                  batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[float, float]:
+                  batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[List[float], List[float]]:
     """
     Find chamfer matching between predicted and target segments.
     Then compute MAE and MSE between matched segments.
@@ -93,8 +114,8 @@ def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
     :return: Chamfer distance
     """
     B = len(batch_pred_segs)
-    mae = 0
-    mse = 0
+    mae_list = []
+    mse_list = []
 
     for b in range(B):
         pred_segs = batch_pred_segs[b].flatten(1)  # (P, N_interp*2)
@@ -104,25 +125,41 @@ def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         cost_matrix = torch.cdist(pred_segs, target_segs, p=2).cpu().detach().numpy()  # (P, Q)
 
         # Find the best match for each segment in the predicted segments
-        row_ind = np.argmin(cost_matrix, axis=1)
+        row_ind = torch.argmin(torch.tensor(cost_matrix, dtype=torch.float32), dim=1)
 
         # Compute MAE and MSE (match the predicted segments to the target segments)
-        mae_p2t = (np.abs(pred_segs - target_segs[row_ind]).mean())
-        mse_p2t = ((np.abs(pred_segs - target_segs[row_ind]) ** 2).mean())
+        mae_p2t = (torch.abs(pred_segs - target_segs[row_ind]).mean())
+        mse_p2t = ((pred_segs - target_segs[row_ind]) ** 2).mean()
 
         # Compute MAE and MSE (match the target segments to the predicted segments)
-        row_ind = np.argmin(cost_matrix, axis=0)
-        mae_t2p = (np.abs(target_segs - pred_segs[row_ind]).mean())
-        mse_t2p = ((np.abs(target_segs - pred_segs[row_ind]) ** 2).mean())
+        row_ind = torch.argmin(torch.tensor(cost_matrix, dtype=torch.float32), dim=0)
+        mae_t2p = (torch.abs(pred_segs[row_ind] - target_segs).mean())
+        mse_t2p = ((pred_segs[row_ind] - target_segs) ** 2).mean()
 
         # Why do we compute p2t and also t2p?
         # When we match p to t, some segments in p may not have a match in t, they are not counted in the loss.
         # When we match t to p, some segments in t may not have a match in p, they are not counted in the loss.
         # So we need to compute both to make sure all segments are counted in the loss.
-        mae += (mae_p2t + mae_t2p)
-        mse += (mse_p2t + mse_t2p)
+        mae = (mae_p2t + mae_t2p).item()
+        mse = (mse_p2t + mse_t2p).item()
 
-    return mae / B, mse / B
+        mae_list.append(mae)
+        mse_list.append(mse)
+
+    return mae_list, mse_list
+
+
+def renderPlot(image, src, dst, current):
+    rgb = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
+    rgb[..., 0] = image
+    rgb[..., 1] = image
+    rgb[..., 2] = image
+
+    cv2.putText(rgb, "s", (src[0], src[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+    cv2.putText(rgb, "d", (dst[0], dst[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+    cv2.circle(rgb, current, 3, (0, 255, 0), 1)
+
+    cv2.imwrite("search_map.png", cv2.resize(rgb, (512, 512), interpolation=cv2.INTER_NEAREST))
 
 
 def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
@@ -138,10 +175,10 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
     current = src
     while current != dst:
         # Take the pixel with the smallest distance to the target
-        neighbors = [(current[0] - 1, current[1]), (current[0] + 1, current[1]),
-                     (current[0], current[1] - 1), (current[0], current[1] + 1)]
-        if len(path) > 1:
-            neighbors.remove((path[-2][0], path[-2][1]))
+        neighbors = [(current[0] + dx, current[1] + dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
+        neighbors.remove(current)
+        # if len(path) > 1:
+        #     neighbors.remove((path[-2][0], path[-2][1]))
         neighbors = list(filter(lambda p: 0 <= p[0] < W and 0 <= p[1] < H and search_grid[p[1], p[0]] != 0, neighbors))
 
         # Compute heuristic distance to the target
@@ -161,7 +198,7 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
         if visualize:
             tmp = heatmap.copy()
             tmp[current[1], current[0]] = 255
-            cv2.imshow("search_map", tmp)
+            cv2.imshow("search_map", cv2.resize(tmp, (512, 512), interpolation=cv2.INTER_NEAREST))
             cv2.waitKey(1)
 
     geometry = LineString(path)
@@ -173,7 +210,8 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
     graph.add_edge(f"{src[0]}_{src[1]}", f"{dst[0]}_{dst[1]}", geometry=geometry)
 
 
-def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = False) -> List[F32[Tensor, "P N_interp 2"]]:
+def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = False) -> List[
+    F32[Tensor, "P N_interp 2"]]:
     B, _, H, W = pred_heatmaps.shape
 
     segs = []
@@ -191,11 +229,11 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
         graph = nx.Graph()
         for (x, y) in keynodes:
             corner_map[y, x] = 255
+            pred_heatmap[y, x] = 1.0
             graph.add_node(f"{x}_{y}", pos=(x, y))
 
         # Now extract the edges (1-pixel wide) from the predicted heatmap
-        edge_map = (pred_heatmap > 0.5) | corner_blobs
-        edge_map = np.uint8(edge_map) * 127
+        edge_map = np.uint8(pred_heatmap > 0.5) * 255
 
         if visualize:
             cv2.imshow("edge_map", edge_map)
@@ -216,27 +254,27 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
                     # set distance to itself to infinity
                     distances[ki] = np.inf
                     nearest_id = np.argmin(distances)
-                    if distances[nearest_id] < 7:
+                    if distances[nearest_id] < 2:
                         src = (kx, ky)
                         dst = (keynodes[nearest_id][0], keynodes[nearest_id][1])
                         findAndAddPath(graph, temp_map, src, dst, visualize)
                         continue
 
                     # Check neighbors
-                    if x > 0 and temp_map[y, x - 1] == 127:
-                        new_frontier.add((x - 1, y))
-                    if x < W - 1 and temp_map[y, x + 1] == 127:
-                        new_frontier.add((x + 1, y))
-                    if y > 0 and temp_map[y - 1, x] == 127:
-                        new_frontier.add((x, y - 1))
-                    if y < H - 1 and temp_map[y + 1, x] == 127:
-                        new_frontier.add((x, y + 1))
+                    neighbors = [(x + dx, y + dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
+                    neighbors.remove((x, y))
+                    for (newx, newy) in neighbors:
+                        if 0 <= newx < W and 0 <= newy < H and edge_map[newy, newx] != 0 and temp_map[newy, newx] == 255:
+                            new_frontier.add((newx, newy))
+
                 frontier = new_frontier
                 if visualize:
                     cv2.imshow("temp_map", temp_map)
                     cv2.waitKey(1)
 
-        segs.append(torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32, device=pred_heatmaps.device))
+        segs.append(
+            torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32,
+                         device=pred_heatmaps.device))
 
         # Normalize segments to 0-1
         max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
@@ -250,7 +288,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
 def reportAllMetrics(pred_heatmap: F32[Tensor, "B 1 H W"],
                      target_heatmap: F32[Tensor, "B 1 H W"],
                      batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
-                     batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> Tuple[str, str]:
+                     batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> List[List[float]]:
     """
     Compute all metrics for road network prediction
 
@@ -265,7 +303,5 @@ def reportAllMetrics(pred_heatmap: F32[Tensor, "B 1 H W"],
     hungarian_mae, hungarian_mse = hungarianMetric(batch_pred_segs, batch_target_segs)
     chamfer_mae, chamfer_mse = chamferMetric(batch_pred_segs, batch_target_segs)
 
-    title = "heatmap_accuracy,heatmap_precision,heatmap_recall,heatmap_f1,hungarian_mae,hungarian_mse,chamfer_mae,chamfer_mse\n"
-    content = f"{heatmap_accuracy},{heatmap_precision},{heatmap_recall},{heatmap_f1},{hungarian_mae},{hungarian_mse},{chamfer_mae},{chamfer_mse}\n"
-
-    return title, content
+    return [heatmap_accuracy, heatmap_precision, heatmap_recall, heatmap_f1,
+            hungarian_mae, hungarian_mse, chamfer_mae, chamfer_mse]
