@@ -82,14 +82,23 @@ class RoutesDiT(nn.Module):
             Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
             nn.Conv1d(d_context, 32, 3, 2, 1),
             Swish(),
-            Conv1dNormAct(32, 128, 3, 2, 1),
-            *[Res1D(128, 256, 128) for _ in range(4)],
 
-            Conv1dNormAct(128, 256, 3, 2, 1),
-            Rearrange("(B N) D L", "B N L D", N=N_routes)
+            *[Res1D(32, 64, 32) for _ in range(3)],
+            Conv1dNormAct(32, 64, 3, 1, 1),
+
+            *[Res1D(64, 128, 64) for _ in range(3)],
+            Conv1dNormAct(64, 128, 3, 1, 1),
+
+            *[Res1D(128, 256, 128) for _ in range(3)],
+            Conv1dNormAct(128, 256, 3, 1, 1),
+
+            Rearrange("(B N) D L", "B (N L) D", N=N_routes),
+
+            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
+            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
+
+            Rearrange("B (N L) D", "B N L D", N=N_routes)
         )
-
-        self.pos_traj = nn.Parameter(torch.randn(1, 1, L_traj//8, 256))
 
         self.stages = SequentialWithAdditionalInputs(
             *[Block(N_routes, L_route, 128, 128, 256, 512, 8) for _ in range(n_layers)]
@@ -113,7 +122,7 @@ class RoutesDiT(nn.Module):
 
         t = self.time_embed(t)
         x = self.x_proj(x) + self.pos_route
-        context = self.context_proj(context) + self.pos_traj
+        context = self.context_proj(context)
 
         x = rearrange(x, "B N L D -> B (N L) D")
         context = rearrange(context, "B N L D -> B (N L) D")

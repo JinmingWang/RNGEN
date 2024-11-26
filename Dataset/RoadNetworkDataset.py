@@ -269,7 +269,7 @@ class RoadNetworkDataset():
     def getTargetHeatmaps(batch,
                           H: int,
                           W: int,
-                          line_width: int = 2) -> Dict[str, Float[Tensor, "B 1 H W"]]:
+                          line_width: int = 3) -> Dict[str, Float[Tensor, "B 1 H W"]]:
         """
         Compute the target heatmaps for the given segments
         :param segs: the segments tensor
@@ -288,7 +288,7 @@ class RoadNetworkDataset():
             # Get the bounding box of the segment
             trajs = batch["trajs"][i]
             L_traj = batch["L_traj"][i]
-            points = torch.cat([trajs[i, :L_traj[i]] for i in range(48)], dim=0)
+            points = torch.cat([trajs[j, :L_traj[j]] for j in range(trajs.shape[0])], dim=0)
             min_point = torch.min(points, dim=0, keepdim=True).values
             max_point = torch.max(points, dim=0, keepdim=True).values
             point_range = max_point - min_point

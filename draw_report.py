@@ -1,8 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
-report = pd.read_csv("Report_all.csv")
+file_names = list(filter(lambda name: name.startswith("Report"), os.listdir()))
+
+model_names = list(map(lambda name: name[:-4].split("_")[-1], file_names))
+
+reports = {model_name: pd.read_csv(file_name) for (model_name, file_name) in zip(model_names, file_names)}
 
 
 colors = ["red", "blue", "green", "yellow", "orange", "purple", "pink", "cyan"]
@@ -14,8 +19,6 @@ titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1
 fig, axes = plt.subplots(2, 4, figsize=(16, 8))
 axes = axes.flatten()
 
-model_names = report["name"].unique()
-
 for i, title in enumerate(titles):
     axes[i].set_title(title)
     # draw grid
@@ -23,7 +26,7 @@ for i, title in enumerate(titles):
     axes[i].set_xlabel("Models")
     axes[i].set_ylabel(title.replace("_", " "))
 
-    model_data = [np.array(report[report["name"] == name][title].values) for name in model_names]
+    model_data = [dataframe[title].to_numpy() for dataframe in reports.values()]
     parts = axes[i].violinplot(model_data, showmeans=False, showmedians=False, showextrema=False)
     for j, pc in enumerate(parts['bodies']):
         pc.set_facecolor(colors[j])

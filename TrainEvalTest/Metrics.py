@@ -235,9 +235,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
         # Now extract the edges (1-pixel wide) from the predicted heatmap
         edge_map = np.uint8(pred_heatmap > 0.5) * 255
 
-        if visualize:
-            cv2.imshow("edge_map", edge_map)
-            cv2.waitKey(0)
+        cv2.imwrite("edge_map.png", edge_map)
 
         temp_map = edge_map.copy()
 
@@ -276,14 +274,20 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
             torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32,
                          device=pred_heatmaps.device))
 
+        for seg_i in range(len(segs[-1])):
+            if segs[-1][seg_i, 0, 0] > segs[-1][seg_i, -1, 0]:
+                segs[-1][seg_i] = segs[-1][seg_i].flip(0)
+
         try:
             # Normalize segments to 0-1
             max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
             min_point = torch.min(segs[-1].flatten(0, 1), dim=0).values
             point_range = max_point - min_point
             segs[-1] = ((segs[-1] - min_point) / point_range)
+            if torch.any(torch.isnan(segs[-1])):
+                print("nan")
         except:
-            return None
+            segs[-1] = torch.zeros(1, 8, 2, dtype=torch.float32, device=pred_heatmaps.device)
 
     return segs
 

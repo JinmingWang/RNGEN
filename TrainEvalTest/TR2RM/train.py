@@ -54,7 +54,7 @@ def train():
                 batch: Dict[str, torch.Tensor]
 
                 H, W = batch["heatmap"].shape[-2:]
-                batch |= RoadNetworkDataset.getTargetHeatmaps(batch, H, W, 1)
+                batch |= RoadNetworkDataset.getTargetHeatmaps(batch, H, W)
 
                 optimizer.zero_grad()
 
