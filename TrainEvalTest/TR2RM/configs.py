@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "initial"
+COMMENT = "sparse"
 
 # Training Parameters
 LR = 2e-4
