@@ -71,7 +71,7 @@ class DRAC(nn.Module):
 
 
 class CDVAE_Attn(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int, *args, **kwargs):
+    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int):
         super(CDVAE_Attn, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -165,7 +165,7 @@ class CrossDomainVAE(nn.Module):
 
         attn_params = {
             "l_in": self.N_segs, "d_in": 384, "d_head": 64, "d_expand": 768, "d_out": 384,
-            "n_heads": 8, "dropout": 0.0, "score_metric": "l2"
+            "n_heads": 8
         }
 
         self.decoder_shared = nn.Sequential(

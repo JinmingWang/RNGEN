@@ -36,7 +36,6 @@ def test():
     with open(f"Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
-            batch |= RoadNetworkDataset.getTargetHeatmaps(batch, 256, 256)
 
             with torch.no_grad():
                 pred_1 = stage_1(batch["heatmap"])

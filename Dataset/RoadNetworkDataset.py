@@ -78,6 +78,8 @@ class RoadNetworkDataset():
         self.max_L_route = self.routes.shape[2]
         self.max_N_segs, self.N_interp = self.segs.shape[1:3]
 
+        self.getTargetHeatmaps()
+
         print(str(self))
 
     def __str__(self):
@@ -148,6 +150,7 @@ class RoadNetworkDataset():
             "routes": routes,
             "segs": segs,
             "heatmap": self.heatmaps[idx].to(DEVICE),
+            "target_heatmaps": self.target_heatmaps[idx].to(DEVICE),
             "image": self.images[idx].to(DEVICE),
             "L_traj": L_traj,
             "L_route": L_route,
@@ -175,6 +178,46 @@ class RoadNetworkDataset():
 
         for i in range(0, end, self.batch_size):
             yield self[shuffled_indices[i:i+self.batch_size]]
+
+
+    @staticmethod
+    def getNodeHeatmaps(batch: dict):
+        """
+        Draw heatmap for the nodes
+        :param batch: the batch of data
+        :return: the heatmap of the nodes
+        """
+        B, _, H, W = batch["heatmap"].shape
+
+        node_maps = torch.zeros((B, 1, H, W), dtype=torch.float32, device=DEVICE)
+
+        for i in range(B):
+            # Get the bounding box of the segment
+            trajs = batch["trajs"][i]
+            L_traj = batch["L_traj"][i]
+            points = torch.cat([trajs[j, :L_traj[j]] for j in range(trajs.shape[0])], dim=0)
+            min_point = torch.min(points, dim=0, keepdim=True).values
+            max_point = torch.max(points, dim=0, keepdim=True).values
+            point_range = max_point - min_point
+
+            segs = batch["segs"][i]     # (N_segs, N_interp, 2)
+            segs = segs[torch.all(segs.flatten(1) != 0, dim=1)]
+
+            segs = (segs - min_point.view(1, 1, 2)) / point_range.view(1, 1, 2)
+
+            segs[..., 0] *= W
+            segs[..., 1] *= H
+
+            seg_end_points = segs[:, [0, -1], :].flatten(0, 1)  # (2 * N_segs, 2)
+
+            # fill seg end points pixels
+            node_map = torch.zeros((H, W), dtype=torch.float32, device=DEVICE)
+            node_map[seg_end_points[:, 1].long(), seg_end_points[:, 0].long()] = 1
+
+            node_maps[i, 0] = node_map
+
+        return {"node_heatmap": node_maps}
+
 
     @staticmethod
     def sequencesToSegments(seqs: torch.Tensor, L_seg: int) -> torch.Tensor:
@@ -265,11 +308,7 @@ class RoadNetworkDataset():
 
         return {"joints": joint_matrix.to(torch.float32)}
 
-    @staticmethod
-    def getTargetHeatmaps(batch,
-                          H: int,
-                          W: int,
-                          line_width: int = 3) -> Dict[str, Float[Tensor, "B 1 H W"]]:
+    def getTargetHeatmaps(self, line_width: int = 3):
         """
         Compute the target heatmaps for the given segments
         :param segs: the segments tensor
@@ -279,37 +318,36 @@ class RoadNetworkDataset():
         :param line_width: the width of the line
         :return: the target heatmaps of shape (B, 1, H, W)
         """
+        target_heatmaps = np.zeros((self.N_data, 1, self.img_H, self.img_W), dtype=np.uint8)
 
-        B = batch["trajs"].shape[0]
-
-        heatmaps = np.zeros((B, 1, H, W), dtype=np.float32)
-
-        for i in range(B):
+        for i in range(self.N_data):
             # Get the bounding box of the segment
-            trajs = batch["trajs"][i]
-            L_traj = batch["L_traj"][i]
-            points = torch.cat([trajs[j, :L_traj[j]] for j in range(trajs.shape[0])], dim=0)
+            points = torch.cat([self.trajs[i, j, :self.L_traj[i, j]] for j in range(self.trajs[i].shape[0])], dim=0)
             min_point = torch.min(points, dim=0, keepdim=True).values
             max_point = torch.max(points, dim=0, keepdim=True).values
             point_range = max_point - min_point
 
-            segs = batch["segs"][i]     # (N_segs, N_interp, 2)
+            segs = self.segs[i]     # (N_segs, N_interp, 2)
             segs = segs[torch.all(segs.flatten(1) != 0, dim=1)]
 
             segs = (segs - min_point.view(1, 1, 2)) / point_range.view(1, 1, 2)
 
-            segs[..., 0] *= W
-            segs[..., 1] *= H
+            segs[..., 0] *= self.img_W
+            segs[..., 1] *= self.img_H
+
+            lons = segs[:, :, 0].cpu().numpy().astype(np.int32)
+            lats = segs[:, :, 1].cpu().numpy().astype(np.int32)
 
             for j in range(len(segs)):
-                lons = segs[j, :, 0].cpu().numpy().astype(np.int32)
-                lats = segs[j, :, 1].cpu().numpy().astype(np.int32)
                 # Draw the polyline
-                cv2.polylines(heatmaps[i, 0], [np.stack([lons, lats], axis=1)], False,
-                              1.0, thickness=line_width)
+                cv2.polylines(target_heatmaps[i, 0],
+                              [np.stack([lons[j], lats[j]], axis=-1)],
+                                isClosed=False,
+                                color=1,
+                                thickness=line_width)
 
+        self.target_heatmaps = torch.tensor(target_heatmaps, dtype=torch.float32, device=DEVICE)
 
-        return {"target_heatmaps": torch.tensor(heatmaps, dtype=torch.float32, device=DEVICE)}
 
     @staticmethod
     def heatmapsToSegments(heatmaps: Float[Tensor, "B 1 H W"]):

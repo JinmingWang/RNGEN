@@ -1,22 +1,22 @@
 from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.SmallMapUNet.configs import *
+from TrainEvalTest.NodeExtractor.configs import *
 from TrainEvalTest.Utils import *
 
 import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
 
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import UNet2D
+from Models import AD_Linked_Net
 
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",

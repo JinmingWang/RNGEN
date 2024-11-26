@@ -352,21 +352,40 @@ class ProgressManager:
             time.sleep(self.refresh_interval)
 
 
+# When window size is large, this is too slow, try change to torch
+# class MovingAvg():
+#     def __init__(self, window_size: int):
+#         self.window_size = window_size
+#         self.values = []
+#
+#     def update(self, value):
+#         self.values.append(float(value))
+#         if len(self.values) > self.window_size:
+#             self.values.pop(0)
+#
+#     def get(self) -> float:
+#         return np.mean(self.values).item()
+#
+#     def __len__(self):
+#         return len(self.values)
+
 class MovingAvg():
     def __init__(self, window_size: int):
         self.window_size = window_size
-        self.values = []
+        self.values = torch.zeros(window_size, dtype=torch.float32, device='cuda')
+        self.idx = 0
+        self.count = 0
 
-    def update(self, value):
-        self.values.append(float(value))
-        if len(self.values) > self.window_size:
-            self.values.pop(0)
+    def update(self, value: Float):
+        self.values[self.idx] = value
+        self.idx = (self.idx + 1) % self.window_size
+        self.count = min(self.count + 1, self.window_size)
 
-    def get(self) -> float:
-        return np.mean(self.values).item()
+    def get(self) -> Float:
+        return self.values[:self.count].mean().item()
 
     def __len__(self):
-        return len(self.values)
+        return self.count
 
 
 def matchJoints(segments: torch.Tensor, joints: torch.Tensor) -> torch.Tensor:

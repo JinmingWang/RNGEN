@@ -53,9 +53,6 @@ def train():
             for i, batch in enumerate(dataset):
                 batch: Dict[str, torch.Tensor]
 
-                H, W = batch["heatmap"].shape[-2:]
-                batch |= RoadNetworkDataset.getTargetHeatmaps(batch, H, W)
-
                 optimizer.zero_grad()
 
                 pred_heatmap = model(torch.cat([batch["heatmap"], batch["image"]], dim=1))
