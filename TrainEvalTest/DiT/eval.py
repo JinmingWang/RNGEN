@@ -15,7 +15,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     :param vae: The VAE model
     :return: The figure and loss
     """
-    test_set = RoadNetworkDataset("Dataset/Tokyo_10k",
+    test_set = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",

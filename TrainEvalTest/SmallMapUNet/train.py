@@ -16,7 +16,7 @@ from Models import UNet2D
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -28,6 +28,8 @@ def train():
 
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
+
+    loadModels("Runs/SmallMapUNet/241124_0231_sparse/last.pth", stage_1=stage_1, stage_2=stage_2)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(stage_1)

@@ -16,7 +16,7 @@ from Models import AD_Linked_Net
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -27,6 +27,8 @@ def train():
                                  )
 
     model = AD_Linked_Net(d_in=4, H=256, W=256).to(DEVICE)
+
+    loadModels("Runs/TR2RM/241124_0231_sparse/last.pth", ADLinkedNet=model)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(model)

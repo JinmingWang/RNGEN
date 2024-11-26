@@ -18,7 +18,7 @@ from Diffusion import DDIM
 def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                          N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
-    loadModels("Runs/CDVAE/241121_1618_final/last.pth", vae=vae)
+    loadModels("Runs/CDVAE/241125_0625_sparse/last.pth", vae=vae)
     vae.eval()
 
     DiT = RoutesDiT(D_in=dataset.N_interp * 2,
@@ -38,7 +38,7 @@ def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
 
 def train():
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k",
+    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
