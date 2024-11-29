@@ -14,28 +14,6 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import RoutesDiT, CrossDomainVAE
 from Diffusion import DDIM
 
-
-def prepareModels(dataset) -> Dict[str, torch.nn.Module]:
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
-                         N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
-    loadModels("Runs/CDVAE/241125_0625_sparse/last.pth", vae=vae)
-    vae.eval()
-
-    DiT = RoutesDiT(D_in=dataset.N_interp * 2,
-                    N_routes=dataset.N_trajs,
-                    L_route=dataset.max_L_route,
-                    L_traj=dataset.max_L_traj,
-                    d_context=2,
-                    n_layers=6,
-                    T=T).to(DEVICE)
-
-    torch.set_float32_matmul_precision("high")
-    torch.compile(DiT)
-
-    # loadModels("Runs/SegmentsModel/20241029_021329_Use_Paths/last.pth", SegmentsModel=DiT, PathEncoder=traj_encoder)
-    return {"DiT": DiT, "VAE": vae}
-
-
 def train():
     # Dataset & DataLoader
     dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
@@ -48,15 +26,34 @@ def train():
                                  )
 
     # Models
-    models = prepareModels(dataset)
+    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+                         N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    loadModels("Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth", vae=vae)
+    vae.eval()
 
-    eval = getEvalFunction(models["VAE"])
+    DiT = RoutesDiT(D_in=dataset.N_interp * 2,
+                    N_routes=dataset.N_trajs,
+                    L_route=dataset.max_L_route,
+                    L_traj=dataset.max_L_traj,
+                    d_context=2,
+                    n_layers=6,
+                    T=T)
 
-    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=1, data_dim=3)
+    torch.set_float32_matmul_precision("high")
+    torch.compile(DiT)
+
+    # state_dict = torch.load("Runs/PathsDiT/241125_2244_Sparse/last.pth")["PathsDiT"]
+    # DiT.load_state_dict(state_dict)
+
+    DiT = DiT.to(DEVICE)
+
+    eval = getEvalFunction(vae)
+
+    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
     loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
-    optimizer = AdamW(models["DiT"].parameters(), lr=LR, amsgrad=True)
+    optimizer = AdamW(DiT.parameters(), lr=LR, amsgrad=True)
     lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
                                      min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
 
@@ -75,29 +72,24 @@ def train():
                 batch: Dict[str, Tensor]
 
                 with torch.no_grad():
-                    latent, _ = models["VAE"].encode(batch["routes"])    # (B, N_trajs, L_route, N_interp*2)
+                    latent, _ = vae.encode(batch["routes"])    # (B, N_trajs, L_route, N_interp*2)
 
                 latent_noise = torch.randn_like(latent)
 
                 t = torch.randint(0, T, (B,)).to(DEVICE)
                 latent_noisy = ddim.diffusionForward(latent, t, latent_noise)
 
-                optimizer.zero_grad()
-
-                latent_noise_pred = models["DiT"](latent_noisy, batch["trajs"], t)
+                latent_noise_pred = DiT(latent_noisy, batch["trajs"], t)
 
                 loss = loss_func(latent_noise_pred, latent_noise) * 100
-
                 loss.backward()
-
-                # Gradient Clipping
-                torch.nn.utils.clip_grad_norm_(models["DiT"].parameters(), 1.0)
-
+                torch.nn.utils.clip_grad_norm_(DiT.parameters(), 1.0)
                 optimizer.step()
+                optimizer.zero_grad()
 
                 total_loss += loss.item()
                 global_step += 1
-                mov_avg_loss.update(loss)
+                mov_avg_loss.update(loss.item())
 
                 progress.update(e, i, Loss=mov_avg_loss.get(), lr=optimizer.param_groups[0]['lr'])
 
@@ -106,14 +98,14 @@ def train():
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
             if e % EVAL_INTERVAL == 0:
-                figure, eval_loss = eval(models, ddim)
+                figure, eval_loss = eval(DiT, ddim)
                 writer.add_figure("Evaluation", figure, global_step)
-                writer.add_scalar("loss/eval", eval_loss.item(), global_step)
+                writer.add_scalar("loss/eval", eval_loss, global_step)
 
-            saveModels(LOG_DIR + "last.pth", PathsDiT=models["DiT"])
+            saveModels(LOG_DIR + "last.pth", DiT=DiT)
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(LOG_DIR + "best.pth", PathsDiT=models["DiT"])
+                saveModels(LOG_DIR + "best.pth", DiT=DiT)
 
             lr_scheduler.step(total_loss)
 

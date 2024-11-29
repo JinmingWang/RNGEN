@@ -29,15 +29,14 @@ class Block(nn.Module):
             Rearrange("B (N L) D", "(B N) D L", N=n_paths),
             Res1D(d_mid, d_mid*2, d_mid),
             Res1D(d_mid, d_mid*2, d_mid),
-            nn.Conv1d(d_mid, d_out, 3, 1, 1),
             Rearrange("(B N) D L", "B (N L) D", N=n_paths)
         )
 
         self.attn = AttentionWithTime(
             l_in=n_paths * l_path,
-            d_in=d_out,
-            d_head=d_out // 4,
-            d_expand=d_out * 2,
+            d_in=d_mid,
+            d_head=64,
+            d_expand=d_mid * 2,
             d_out=d_out,
             d_time=d_in,
             n_heads=self.n_heads,
@@ -53,61 +52,59 @@ class Block(nn.Module):
 
 
 class RoutesDiT(nn.Module):
-    @cacheArgumentsUponInit
     def __init__(self, D_in: int, N_routes: int, L_route: int, L_traj: int, d_context: int, n_layers: int, T: int):
         super().__init__()
+        self.D_in = D_in
+        self.N_routes = N_routes
+        self.L_route = L_route
+        self.L_traj = L_traj
+        self.d_context = d_context
+        self.n_layers = n_layers
+        self.T = T
 
         self.time_embed = nn.Sequential(
             nn.Embedding(T, 128),
             nn.Linear(128, 256),
             nn.LeakyReLU(inplace=True),
-            nn.Linear(256, 512),
+            nn.Linear(256, 256),
             nn.LeakyReLU(inplace=True),
             nn.Unflatten(-1, (1, -1))
         )
 
         # Input: (B, N, L, 2)
 
-        self.x_proj = nn.Sequential(
-            Rearrange("B N L D", "(B N) D L"), # (BN, 2, L)
+        self.route_proj = nn.Sequential(
+            Rearrange("B N L D", "(B N) D L"),
             nn.Conv1d(D_in, 32, 3, 1, 1),
             Swish(),
             nn.Conv1d(32, 128, 3, 1, 1),
-            Rearrange("(B N) D L", "B N L D", N=N_routes)
-        )
-
-        self.pos_route = nn.Parameter(torch.randn(1, 1, L_route, 128))
-
-        self.context_proj = nn.Sequential(
-            Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
-            nn.Conv1d(d_context, 32, 3, 2, 1),
-            Swish(),
-
-            *[Res1D(32, 64, 32) for _ in range(3)],
-            Conv1dNormAct(32, 64, 3, 1, 1),
-
-            *[Res1D(64, 128, 64) for _ in range(3)],
-            Conv1dNormAct(64, 128, 3, 1, 1),
-
-            *[Res1D(128, 256, 128) for _ in range(3)],
-            Conv1dNormAct(128, 256, 3, 1, 1),
-
             Rearrange("(B N) D L", "B (N L) D", N=N_routes),
-
-            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
-            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
-
-            Rearrange("B (N L) D", "B N L D", N=N_routes)
+            AttentionBlock(L_route * N_routes, 128, 64, 512, 256, 4),
         )
 
-        self.stages = SequentialWithAdditionalInputs(
-            *[Block(N_routes, L_route, 128, 128, 256, 512, 8) for _ in range(n_layers)]
+        self.traj_proj = nn.Sequential(
+            # Trajectory inner feature extraction
+            # traj -> feature sequence
+            Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
+            nn.Conv1d(d_context, 128, 3, 2, 1), Swish(),
+            *[Res1D(128, 256, 128) for _ in range(4)],
+            nn.Conv1d(128, 256, 3, 1, 1),
+
+            # Attention among all traj tokens
+            Rearrange("(B N) D L", "B (N L) D", N=N_routes),
+            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
+            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
         )
+
+        self.stages = SequentialWithAdditionalInputs(*[
+            Block(N_routes, L_route, 256, 256, 256, 256, 8)
+            for _ in range(n_layers)
+        ])
 
         # (B, N, L, 128)
         self.head = nn.Sequential(
             Rearrange("B (N L) D",  "B N L D", N=N_routes),
-            nn.Linear(128, 64),
+            nn.Linear(256, 64),
             Swish(),
             nn.Linear(64, D_in)
         )
@@ -118,14 +115,10 @@ class RoutesDiT(nn.Module):
         :param traj_encoding: (B, N_traj=32, traj_encoding_c=128)
         :return:
         """
-        B = x.shape[0]
 
         t = self.time_embed(t)
-        x = self.x_proj(x) + self.pos_route
-        context = self.context_proj(context)
-
-        x = rearrange(x, "B N L D -> B (N L) D")
-        context = rearrange(context, "B N L D -> B (N L) D")
+        x = self.route_proj(x)
+        context = self.traj_proj(context)
 
         x = self.stages(x, context, t)
 

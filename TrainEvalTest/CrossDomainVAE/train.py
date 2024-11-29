@@ -30,7 +30,7 @@ def train():
 
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
 
-    # loadModels("Runs/CDVAE/241121_1618_final/last.pth", vae=vae)
+    loadModels("Runs/CDVAE/241125_0625_sparse/last.pth", vae=vae)
 
     cluster_loss_func = ClusterLoss()
     rec_loss_func = torch.nn.MSELoss()

@@ -68,7 +68,7 @@ class PlotManager:
         self.fig, self.axs = plt.subplots(grid_rows, grid_cols, figsize=(grid_cols * cell_size, grid_rows * cell_size))
         self.axs = np.atleast_2d(self.axs)  # Ensure axs is 2D, even if it's a single row/col
 
-    def plotSegments(self, segs, row, col, title, refresh=True, color=None):
+    def plotSegments(self, segs, row, col, title, refresh=True, color=None, xlims=None, ylims=None):
         """
         Plot line segments given a tensor of shape (..., N_points, 2)
         """
@@ -85,8 +85,13 @@ class PlotManager:
             ax.scatter(x_coords[seg_i, 0], y_coords[seg_i, 0], marker='.', color=color, s=10)
             ax.scatter(x_coords[seg_i, -1], y_coords[seg_i, -1], marker='.', color=color, s=10)
 
-        ax.set_xlim([-3, 3])
-        ax.set_ylim([-3, 3])
+        if xlims is None:
+            xlims = [-3, 3]
+        if ylims is None:
+            ylims = [-3, 3]
+
+        ax.set_xlim(xlims)
+        ax.set_ylim(ylims)
         ax.set_aspect('equal')
         ax.grid(True, linestyle='--', alpha=0.5)
         ax.set_xlabel('Longitude', fontsize=12)

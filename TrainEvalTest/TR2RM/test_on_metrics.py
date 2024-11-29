@@ -7,7 +7,7 @@ import torch
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import AD_Linked_Net
+from Models import AD_Linked_Net, NodeExtractor
 
 def test():
     dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
@@ -22,9 +22,13 @@ def test():
 
     model = AD_Linked_Net(d_in=4, H=256, W=256).to(DEVICE)
 
+    node_extractor = NodeExtractor().to(DEVICE)
+
     loadModels("Runs/TR2RM/241124_1849_sparse/last.pth", ADLinkedNet=model)
+    loadModels("Runs/NodeExtractor/241126_2349_initial/last.pth", node_model=node_extractor)
 
     model.eval()
+    node_extractor.eval()
 
     titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
                 "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
@@ -37,6 +41,7 @@ def test():
 
             with torch.no_grad():
                 pred_heatmap = model(torch.cat([batch["heatmap"], batch["image"]], dim=1))
+                pred_nodemap = node_extractor(pred_heatmap)
 
             batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
             max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
@@ -46,7 +51,7 @@ def test():
             for b, segs in enumerate(batch_segs):
                 norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
 
-            pred_segs = heatmapsToSegments(pred_heatmap)
+            pred_segs = heatmapsToSegments(pred_heatmap, pred_nodemap)
             batch_scores = reportAllMetrics(pred_heatmap, batch["target_heatmaps"], pred_segs, norm_segs)
 
             batch_scores = np.array(batch_scores).T
