@@ -27,8 +27,8 @@ class Block(nn.Module):
         d_mid = d_in + d_context
         self.res = nn.Sequential(
             Rearrange("B (N L) D", "(B N) D L", N=n_paths),
-            Res1D(d_mid, d_mid*2, d_mid),
-            Res1D(d_mid, d_mid*2, d_mid),
+            SERes1D(d_mid, d_mid, d_mid),
+            SERes1D(d_mid, d_mid, d_mid),
             Rearrange("(B N) D L", "B (N L) D", N=n_paths)
         )
 
@@ -37,18 +37,26 @@ class Block(nn.Module):
             d_in=d_mid,
             d_head=64,
             d_expand=d_mid * 2,
-            d_out=d_out,
+            d_out=d_in,
             d_time=d_in,
             n_heads=self.n_heads,
             dropout=self.dropout
         )
 
+        self.out_proj = nn.Sequential(
+            Swish(),
+            nn.Linear(d_in, d_out)
+        )
+
+        self.shortcut = nn.Identity() if d_in == d_out else nn.Linear(d_in, d_out)
+
     def forward(self, x, context, t):
         # x: (B, N, L, D)
         # context: (B, N, L, D')
+        residual = self.shortcut(x)
         x = self.res(torch.cat([x, context], dim=-1))   # (B, N, L, D)
         x = self.attn(x, self.time_proj(t))
-        return x
+        return self.out_proj(x) + residual
 
 
 class RoutesDiT(nn.Module):
@@ -75,11 +83,10 @@ class RoutesDiT(nn.Module):
 
         self.route_proj = nn.Sequential(
             Rearrange("B N L D", "(B N) D L"),
-            nn.Conv1d(D_in, 32, 3, 1, 1),
+            nn.Conv1d(D_in, 64, 3, 1, 1),
             Swish(),
-            nn.Conv1d(32, 128, 3, 1, 1),
+            nn.Conv1d(64, 256, 3, 1, 1),
             Rearrange("(B N) D L", "B (N L) D", N=N_routes),
-            AttentionBlock(L_route * N_routes, 128, 64, 512, 256, 4),
         )
 
         self.traj_proj = nn.Sequential(

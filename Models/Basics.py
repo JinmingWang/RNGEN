@@ -370,6 +370,41 @@ class Res2D(nn.Module):
         return self.shortcut(x) + self.layers(x)
 
 
+
+class SERes1D(nn.Module):
+    def __init__(self, d_in: int, d_mid: int, d_out: int):
+        super().__init__()
+
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            nn.Conv1d(d_in, d_in // 4, 1, 1, 0),
+            Swish(),
+            nn.Conv1d(d_in // 4, d_in, 1, 1, 0),
+            nn.Sigmoid()
+        )
+
+        self.s1 = nn.Sequential(
+            nn.Conv1d(d_in, d_mid, 1, 1, 0),
+            nn.GroupNorm(8, d_mid),
+            Swish(),
+            nn.Conv1d(d_mid, d_mid, 3, 1, 1))
+
+        self.s2 = nn.Sequential(
+            nn.GroupNorm(8, d_mid),
+            Swish(),
+            nn.Conv1d(d_in, d_out, 1, 1, 0)
+        )
+
+        torch.nn.init.zeros_(self.s2[-1].weight)
+        torch.nn.init.zeros_(self.s2[-1].bias)
+
+        self.shortcut = nn.Identity() if d_in == d_out else nn.Conv1d(d_in, d_out, 1, 1, 0)
+
+    def forward(self, x):
+        return self.shortcut(x) + self.s2(self.s1(x) * self.se(x))
+
+
+
 class Res1D(nn.Module):
     def __init__(self, d_in: int, d_mid: int, d_out: int):
         super().__init__()
