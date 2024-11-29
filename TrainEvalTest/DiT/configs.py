@@ -1,7 +1,7 @@
 
 from datetime import datetime
 
-COMMENT = "Sparse"
+COMMENT = "300M"
 
 # Training Parameters
 LR = 2e-4
@@ -16,4 +16,4 @@ LOG_DIR = f"./Runs/PathsDiT/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{COMMEN
 # Logging Parameters
 MOV_AVG_LEN = 6     # Epochs
 LOG_INTERVAL = 10   # steps
-EVAL_INTERVAL = 5   # Epochs
+EVAL_INTERVAL = 10   # Epochs

@@ -1,10 +1,10 @@
 
 from datetime import datetime
 
-COMMENT = "sparse"
+COMMENT = "sparse_kl1e-6"
 
 # Training Parameters
-KL_WEIGHT = 1e-5
+KL_WEIGHT = 1e-6
 LR = 1e-4
 LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 30

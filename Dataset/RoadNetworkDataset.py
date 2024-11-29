@@ -116,6 +116,16 @@ class RoadNetworkDataset():
         batch["routes"] += point_shift.unsqueeze(1) * (batch["routes"] != 0)
         batch["segs"] += point_shift * (batch["segs"] != 0)
 
+        if np.random.rand() < 0.5:
+            batch["trajs"][..., 0] = -batch["trajs"][..., 0]
+            batch["routes"][..., 0] = -batch["routes"][..., 0]
+            batch["segs"][..., 0] = -batch["segs"][..., 0]
+
+        if np.random.rand() < 0.5:
+            batch["trajs"][..., 1] = -batch["trajs"][..., 1]
+            batch["routes"][..., 1] = -batch["routes"][..., 1]
+            batch["segs"][..., 1] = -batch["segs"][..., 1]
+
         return batch
 
     def __getitem__(self, idx) -> Dict[str, Tensor]:
@@ -168,8 +178,18 @@ class RoadNetworkDataset():
     def __iter__(self):
         if self.shuffle:
             shuffled_indices = torch.randperm(self.N_data)
-        else:
-            shuffled_indices = torch.arange(self.N_data)
+            self.trajs = self.trajs[shuffled_indices].contiguous()
+            self.routes = self.routes[shuffled_indices].contiguous()
+            self.segs = self.segs[shuffled_indices].contiguous()
+            self.images = self.images[shuffled_indices].contiguous()
+            self.heatmaps = self.heatmaps[shuffled_indices].contiguous()
+            self.target_heatmaps = self.target_heatmaps[shuffled_indices].contiguous()
+            self.L_traj = self.L_traj[shuffled_indices].contiguous()
+            self.L_route = self.L_route[shuffled_indices].contiguous()
+            self.N_segs = self.N_segs[shuffled_indices].contiguous()
+            self.mean_norm = self.mean_norm[shuffled_indices].contiguous()
+            self.std_norm = self.std_norm[shuffled_indices].contiguous()
+            self.bboxes = self.bboxes[shuffled_indices].contiguous()
 
         if self.drop_last:
             end = self.N_data - self.N_data % self.batch_size
@@ -177,7 +197,7 @@ class RoadNetworkDataset():
             end = self.N_data
 
         for i in range(0, end, self.batch_size):
-            yield self[shuffled_indices[i:i+self.batch_size]]
+            yield self[i:i+self.batch_size]
 
 
     @staticmethod
@@ -205,8 +225,8 @@ class RoadNetworkDataset():
 
             segs = (segs - min_point.view(1, 1, 2)) / point_range.view(1, 1, 2)
 
-            segs[..., 0] *= W
-            segs[..., 1] *= H
+            segs[..., 0] = torch.clip(segs[..., 0] * W, 0, W-1)
+            segs[..., 1] = torch.clip(segs[..., 1] * H, 0, H-1)
 
             seg_end_points = segs[:, [0, -1], :].flatten(0, 1)  # (2 * N_segs, 2)
 

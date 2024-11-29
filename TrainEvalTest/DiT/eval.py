@@ -8,6 +8,13 @@ from Diffusion import DDIM
 from typing import Callable
 
 import torch
+import os
+
+
+def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, trajs: Tensor):
+    pred = model(*noisy_contents, trajs, t)
+    return [pred]
+
 
 def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     """
@@ -16,9 +23,9 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
     :return: The figure and loss
     """
     test_set = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
-                                 batch_size=B,
+                                 batch_size=10,
                                  drop_last=True,
-                                 set_name="train",
+                                 set_name="test",
                                  enable_aug=True,
                                  img_H=16,
                                  img_W=16
@@ -31,35 +38,26 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
 
     latent_noise = torch.randn_like(latent)
 
-    def eval(models: Dict[str, torch.nn.Module], ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
+    plot_manager = PlotManager(4, 1, 5)
 
-        is_training = dict()
-        for name in models:
-            is_training[name] = models[name].training
-            models[name].eval()
+    def eval(DiT, ddim: DDIM) -> Tuple[plt.Figure, Tensor]:
+
+        DiT.eval()
 
         with torch.no_grad():
-            def pred_func(noisy_contents: List[Tensor], t: Tensor):
-                pred = models["DiT"](*noisy_contents, batch["trajs"], t)
-                return [pred]
-
-            latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps")[0]
-
+            latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps", model=DiT, trajs=batch["trajs"])[0]
             duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
 
         loss = torch.nn.functional.mse_loss(duplicate_segs, batch["routes"].flatten(1, 2))
 
-        plot_manager = PlotManager(4, 1, 5)
         plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
         plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
-        plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
-        plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
+        plot_manager.plotSegments(coi_means[0].detach(), 0, 2, "Pred Segs", color="green")
+        plot_manager.plotSegments(duplicate_segs[0].detach(), 0, 3, "Pred Duplicate Segs")
         plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
 
-        for name in models:
-            if is_training[name]:
-                models[name].train()
+        DiT.train()
 
-        return plot_manager.getFigure(), loss
+        return plot_manager.getFigure(), loss.item()
 
     return eval

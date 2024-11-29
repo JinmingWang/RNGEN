@@ -53,6 +53,8 @@ class DRAC(nn.Module):
         # segment can be {p1, ... pn} or {pn, ... p1}
         cluster_means = torch.softmax(filtered_cluster_mat, dim=-1) @ seqs
 
+        cluster_means[torch.isnan(cluster_means)] = 0
+
         # Step 2: Duplicate Removal, only keep the first token in the cluster
         # lower[i, j] = 1 means token i and j are in the same cluster, and i is after j
         lower = torch.tril(~threshold_mask, diagonal=-1)  # (B, L, L)
@@ -133,9 +135,12 @@ class CDVAE_Attn(nn.Module):
 
 
 class CrossDomainVAE(nn.Module):
-    @cacheArgumentsUponInit
     def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
+        self.N_routes = N_routes
+        self.L_route = L_route
+        self.N_interp = N_interp
+        self.threshold = threshold
 
         self.N_segs = N_routes * L_route
 
@@ -154,8 +159,8 @@ class CrossDomainVAE(nn.Module):
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
 
-            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8, 0.0),
-            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8, 0.0),
+            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8),
+            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8),
 
             Rearrange("B (N_routes L_route) D", "B N_routes L_route D", N_routes=N_routes),
         )

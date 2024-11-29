@@ -210,22 +210,26 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
     graph.add_edge(f"{src[0]}_{src[1]}", f"{dst[0]}_{dst[1]}", geometry=geometry)
 
 
-def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = False) -> List[
-    F32[Tensor, "P N_interp 2"]]:
+def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
+                       pred_nodemaps: F32[Tensor, "B 1 H W"],
+                       visualize: bool = False) -> List[F32[Tensor, "P N_interp 2"]]:
     B, _, H, W = pred_heatmaps.shape
 
     segs = []
 
+    pred_heatmaps = pred_heatmaps.cpu().numpy()
+    local_max_map = torch.nn.functional.max_pool2d(pred_nodemaps, 3, 1, 1)
+    nms_nodemaps = torch.where((pred_nodemaps == local_max_map) * (pred_nodemaps >= 0.2), 1, 0)
+    nms_nodemaps = nms_nodemaps.cpu().numpy()
+
     for i in range(B):
-        pred_heatmap = pred_heatmaps[i, 0].cpu().numpy()
+        pred_heatmap = pred_heatmaps[i, 0]
+        nodemap = nms_nodemaps[i, 0]
 
-        # Corner detection on predicted heatmap
-        temp = cv2.dilate(cv2.cornerHarris(pred_heatmap, 2, 3, 0.08), None, iterations=1)
-        corner_blobs = (temp > 0.05 * temp.max())
+        x_list, y_list = np.where(nodemap == 1)
+        keynodes = zip(x_list, y_list)
 
-        num_labels, _, _, centroids = cv2.connectedComponentsWithStats(np.uint8(corner_blobs), connectivity=8)
-        corner_map = np.zeros_like(np.uint8(corner_blobs))
-        keynodes = centroids.astype(np.int32)[1:]
+        corner_map = np.zeros_like(np.uint8(pred_heatmap))
         graph = nx.Graph()
         for (x, y) in keynodes:
             corner_map[y, x] = 255
@@ -272,7 +276,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
 
         segs.append(
             torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32,
-                         device=pred_heatmaps.device))
+                         device=pred_nodemaps.device))
 
         for seg_i in range(len(segs[-1])):
             if segs[-1][seg_i, 0, 0] > segs[-1][seg_i, -1, 0]:
@@ -287,7 +291,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"], visualize: bool = 
             if torch.any(torch.isnan(segs[-1])):
                 print("nan")
         except:
-            segs[-1] = torch.zeros(1, 8, 2, dtype=torch.float32, device=pred_heatmaps.device)
+            segs[-1] = torch.zeros(1, 8, 2, dtype=torch.float32, device=pred_nodemaps.device)
 
     return segs
 

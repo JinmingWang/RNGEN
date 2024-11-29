@@ -75,7 +75,7 @@ class DDIM:
         :return: x_t-1: output images (B, C, L)
         """
         pred_x0 = (x_tp1 - self.sqrt_1_m_αbar[t] * ϵ_pred) / self.sqrt_αbar[t]
-        if t <= self.skip_step:
+        if t <= self.skip_step * 3:
             return pred_x0
         return self.diffusionForward(pred_x0, next_t, ϵ_pred)
 
@@ -101,7 +101,8 @@ class DDIM:
                           noises: List[Tensor],
                           pred_func: Callable,
                           mode: Literal["eps", "x0"] = "x0",
-                          verbose=False):
+                          verbose=False,
+                          **pred_func_args):
         """
         Backward Diffusion Process
         :param unet: UNet
@@ -120,13 +121,13 @@ class DDIM:
         pbar = tqdm(t_list) if verbose else t_list
         for ti, t in enumerate(pbar):
             if mode == "eps":
-                noise_preds = pred_func(content_list, tensor_t[:, t])
+                noise_preds = pred_func(content_list, tensor_t[:, t], **pred_func_args)
                 t_next = 0 if ti + 1 == len(t_list) else t_list[ti + 1]
 
                 for i in range(len(content_list)):
                     content_list[i] = self.diffusionBackwardStep(content_list[i], t, t_next, noise_preds[i])
             else:
-                x0_preds, noise_preds = pred_func(content_list, tensor_t[:, t])
+                x0_preds, noise_preds = pred_func(content_list, tensor_t[:, t], **pred_func_args)
                 t_next = 0 if ti + 1 == len(t_list) else t_list[ti + 1]
                 for i in range(len(content_list)):
                     content_list[i] = self.diffusionBackwardStepWithx0(x0_preds[i], t, t_next, noise_preds[i])
