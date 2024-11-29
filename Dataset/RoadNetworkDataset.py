@@ -103,10 +103,6 @@ class RoadNetworkDataset():
     def augmentation(self, batch: Dict[str, Tensor]) -> Dict[str, Tensor]:
         """
         Apply data augmentation to the given sample
-        :param trajs: (N, 128, 2)
-        :param paths: (N, 11, 2)
-        :param graph: (G, 2, 2)
-        :param heatmap: (2, H, W)
         :return: The augmented sample
         """
 
@@ -125,6 +121,19 @@ class RoadNetworkDataset():
             batch["trajs"][..., 1] = -batch["trajs"][..., 1]
             batch["routes"][..., 1] = -batch["routes"][..., 1]
             batch["segs"][..., 1] = -batch["segs"][..., 1]
+
+        # Random rotate trajs, routes and segs centered at (0, 0)
+        # trajs: (B, N_traj, L_traj, 2)
+        # routes: (B, N_traj, L_route, N_interp, 2)
+        # segs: (B, N_segs, N_interp, 2)
+        radian = torch.rand(B) * 2 * np.pi
+        cos_theta = torch.cos(radian)
+        sin_theta = torch.sin(radian)
+        rot_matrix = torch.stack([cos_theta, -sin_theta, sin_theta, cos_theta], dim=1).view(B, 2, 2).to(DEVICE)
+
+        batch["trajs"] = torch.einsum("bij,bnlj->bnli", rot_matrix, batch["trajs"])
+        batch["routes"] = torch.einsum("bij,bnlkj->bnlki", rot_matrix, batch["routes"])
+        batch["segs"] = torch.einsum("bij,bnlj->bnli", rot_matrix, batch["segs"])
 
         return batch
 
