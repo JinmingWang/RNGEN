@@ -159,7 +159,7 @@ class PlotManager:
         """
         Plot nodes and their connections based on the adjacency matrix.
 
-        nodes: Tensor of shape (N, 3), where each row is (x, y, is_valid_node)
+        nodes: Tensor of shape (N, 2), where each row is (x, y, is_valid_node)
         adj_mat: Tensor of shape (N, N), adjacency matrix representing connections between nodes
         row, col: Grid position to plot
         title: Title of the plot
@@ -168,10 +168,8 @@ class PlotManager:
         ax.clear()  # Clear previous content
         ax.set_title(title, fontsize=14, color='darkblue')
 
-        node_validity = nodes[:, 2].cpu().detach().numpy()
-
         ax.scatter(nodes[:, 0].cpu().detach().numpy(), nodes[:, 1].cpu().detach().numpy(),
-                   color='#76DA91', s=20 * node_validity, edgecolors='#63B2EE')
+                   color='#76DA91', s=20, edgecolors='#63B2EE')
 
         # Plot connections based on adjacency matrix
         adj_np = adj_mat.cpu().detach().numpy()

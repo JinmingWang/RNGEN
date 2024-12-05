@@ -16,7 +16,10 @@ class RoadNetworkDataset():
                  enable_aug: bool = False,
                  shuffle:bool = True,
                  img_H: int = 256,
-                 img_W: int = 256) -> None:
+                 img_W: int = 256,
+                 need_image: bool = False,
+                 need_heatmap: bool = False,
+                 need_nodes: bool = False) -> None:
         """
         Initialize the dataset, this class loads data from a cache file
         The cache file is created by using LaDeDatasetCacheGenerator class
@@ -34,6 +37,9 @@ class RoadNetworkDataset():
         self.shuffle = shuffle
         self.img_H = img_H
         self.img_W = img_W
+        self.need_image = need_image
+        self.need_heatmap = need_heatmap
+        self.need_nodes = need_nodes
 
         dataset = torch.load(os.path.join(folder_path, "dataset.pt"))
 
@@ -56,12 +62,14 @@ class RoadNetworkDataset():
         self.routes = dataset["routes"][slicing]
         # (N_data, N_segs, N_interp, 2)
         self.segs = dataset["segs"][slicing]
-        # (N_data, 3, H, W)
-        self.images = dataset["images"][slicing]
-        self.images = torch.nn.functional.interpolate(self.images, (img_H, img_W), mode="bilinear")
-        # (N_data, 1, H, W)
-        self.heatmaps = dataset["heatmaps"][slicing]
-        self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
+        if need_image:
+            # (N_data, 3, H, W)
+            self.images = dataset["images"][slicing]
+            self.images = torch.nn.functional.interpolate(self.images, (img_H, img_W), mode="bilinear")
+        if need_heatmap:
+            # (N_data, 1, H, W)
+            self.heatmaps = dataset["heatmaps"][slicing]
+            self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
 
         self.L_traj = dataset["traj_lens"]
         self.L_route = dataset["route_lens"]
@@ -78,7 +86,10 @@ class RoadNetworkDataset():
         self.max_L_route = self.routes.shape[2]
         self.max_N_segs, self.N_interp = self.segs.shape[1:3]
 
-        self.getTargetHeatmaps()
+        if need_heatmap:
+            self.getTargetHeatmaps()
+        if need_nodes:
+            self.segmentsToNodesAdj()
 
         print(str(self))
 
@@ -116,11 +127,17 @@ class RoadNetworkDataset():
             batch["trajs"][..., 0] = -batch["trajs"][..., 0]
             batch["routes"][..., 0] = -batch["routes"][..., 0]
             batch["segs"][..., 0] = -batch["segs"][..., 0]
+            if self.need_nodes:
+                batch["nodes"][..., 0] = -batch["nodes"][..., 0]
+                batch["edges"][..., 0] = -batch["edges"][..., 0]
 
         if np.random.rand() < 0.5:
             batch["trajs"][..., 1] = -batch["trajs"][..., 1]
             batch["routes"][..., 1] = -batch["routes"][..., 1]
             batch["segs"][..., 1] = -batch["segs"][..., 1]
+            if self.need_nodes:
+                batch["nodes"][..., 1] = -batch["nodes"][..., 1]
+                batch["edges"][..., 1] = -batch["edges"][..., 1]
 
         # Random rotate trajs, routes and segs centered at (0, 0)
         # trajs: (B, N_traj, L_traj, 2)
@@ -168,9 +185,6 @@ class RoadNetworkDataset():
             "trajs": trajs,
             "routes": routes,
             "segs": segs,
-            "heatmap": self.heatmaps[idx].to(DEVICE),
-            "target_heatmaps": self.target_heatmaps[idx].to(DEVICE),
-            "image": self.images[idx].to(DEVICE),
             "L_traj": L_traj,
             "L_route": L_route,
             "N_segs": self.N_segs[idx].to(DEVICE),
@@ -178,6 +192,19 @@ class RoadNetworkDataset():
             "std_point": self.std_norm[idx].to(DEVICE),
             "bbox": self.bboxes[idx].to(DEVICE)
         }
+
+        if self.need_heatmap:
+            batch_data["heatmap"] = self.heatmaps[idx].to(DEVICE)
+            batch_data["target_heatmaps"] = self.target_heatmaps[idx].to(DEVICE)
+
+        if self.need_image:
+            batch_data["image"] = self.images[idx].to(DEVICE)
+
+        if self.need_nodes:
+            batch_data["nodes"] = self.nodes[idx].to(DEVICE)
+            batch_data["adj_mats"] = self.adj_mats[idx].to(DEVICE)
+            batch_data["edges"] = self.edges[idx].to(DEVICE)
+            batch_data["N_nodes"] = self.N_nodes[idx].to(DEVICE)
 
         if self.enable_aug:
             return self.augmentation(batch_data)
@@ -263,51 +290,61 @@ class RoadNetworkDataset():
         return result.flatten(-2, -1)  # (B, N_seqs, N_segs, L_seg * 2)
 
 
-    @staticmethod
-    def SegmentsToNodesAdj(graphs: Tensor, nodes_pad_len: int) -> Dict[str, Tensor]:
-        B, N, _, _ = graphs.shape  # B: batch size, N: number of line segments
+    def segmentsToNodesAdj(self) -> None:
+        B, N_segs, N_interp, _ = self.segs.shape
+        nodes_pad_len = N_segs * 2
         nodes_padded = []
         adj_padded = []
+        edges_padded = []
         nodes_counts = []
 
-        for i in range(B):
-            graph = graphs[i]  # Shape: (N, 2, 2)
+        for i in tqdm(range(len(self)), desc="Building Nodes and Adjacency Matrices"):
+            segs = self.segs[i]  # Shape: (N_segs, N_interp, 2)
             # Reshape to (2 * N, 2) to get all endpoints
-            points = graph.view(-1, 2)  # (2N, 2)
+            end_points = segs[:, [0, -1], :].flatten(0, 1)  # (2N, 2)
 
             # Extract unique nodes (2D points)
-            unique_nodes, inverse_indices = torch.unique(points, dim=0, return_inverse=True)
+            unique_nodes, inverse_indices = torch.unique(end_points, dim=0, return_inverse=True)
             num_nodes = unique_nodes.shape[0]
 
             nodes_counts.append(num_nodes)
 
-            # Create node tensor with an additional channel indicating if it's a valid node or padding
-            # Shape: (nodes_pad_len, 3) -> (x, y, is_valid_node)
-            node_tensor = torch.zeros((nodes_pad_len, 3))
+            node_tensor = torch.zeros((nodes_pad_len, 2))
             node_tensor[:num_nodes, :2] = unique_nodes
-            node_tensor[:num_nodes, 2] = 1  # Set is_valid_node to 1 for valid nodes
 
             nodes_padded.append(node_tensor)
 
             # Initialize adjacency matrix of size (nodes_pad_len, nodes_pad_len)
             adj_matrix = torch.zeros((nodes_pad_len, nodes_pad_len), dtype=torch.int32)
+            edge_feature_matrix = torch.zeros((nodes_pad_len, nodes_pad_len, 16), dtype=torch.float32)
 
             # Fill adjacency matrix
-            for j in range(N):
+            for j in range(N_segs):
                 # Get the indices of the two points of the line segment in the unique nodes list
                 p1_idx = inverse_indices[2 * j]  # First point of the line segment
                 p2_idx = inverse_indices[2 * j + 1]  # Second point of the line segment
                 adj_matrix[p1_idx, p2_idx] = 1
-                adj_matrix[p2_idx, p1_idx] = 1  # Undirected graph
+                adj_matrix[p2_idx, p1_idx] = 1  # Undirected segs
+
+                # edge feature is the corresponding segment
+                edge_feature_matrix[p1_idx, p2_idx] = segs[j]
 
             adj_padded.append(adj_matrix)
+            edges_padded.append(edge_feature_matrix)
 
         # Convert lists to tensors using torch.stack
-        nodes_padded_tensor = torch.stack(nodes_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, 3)
+        nodes_padded_tensor = torch.stack(nodes_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, 2)
         adj_padded_tensor = torch.stack(adj_padded).to(torch.float32).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len)
+        edges_padded_tensor = torch.stack(edges_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len, 16)
         nodes_count_tensor = torch.tensor(nodes_counts, dtype=torch.long, device=DEVICE)
 
-        return {"nodes": nodes_padded_tensor, "adj_mats": adj_padded_tensor, "n_nodes": nodes_count_tensor}
+        max_node_count = nodes_count_tensor.max()
+        self.max_N_nodes = max_node_count
+
+        self.nodes = nodes_padded_tensor[:, :max_node_count]
+        self.adj_mats = adj_padded_tensor[:, :max_node_count, :max_node_count]
+        self.edges = edges_padded_tensor[:, :max_node_count, :max_node_count]
+        self.N_nodes = nodes_count_tensor
 
 
     @staticmethod
