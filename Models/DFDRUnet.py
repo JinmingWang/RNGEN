@@ -65,10 +65,10 @@ class GatedFusionModule(nn.Module):
 
 
 class DRUNet(nn.Module):
-    def __init__(self):
+    def __init__(self, d_in: int):
         super().__init__()
 
-        self.enc0 = DilationRes(1, 16, 16)
+        self.enc0 = DilationRes(d_in, 16, 16)
         self.enc1 = DilationRes(16, 32, 32)
         self.enc2 = DilationRes(32, 64, 64)
         self.enc3 = DilationRes(64, 128, 128)
@@ -102,9 +102,9 @@ class DFDRUNet(nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.drunet_image = DRUNet()
+        self.drunet_image = DRUNet(3)
 
-        self.drunet_traj = DRUNet()
+        self.drunet_traj = DRUNet(1)
 
         self.init_feature = nn.Parameter(torch.zeros(1, 256, 8, 8))
 
@@ -120,10 +120,11 @@ class DFDRUNet(nn.Module):
         )
 
     def forward(self, image, traj):
+        B = image.shape[0]
         image_features = self.drunet_image(image)
         traj_features = self.drunet_traj(traj)
 
-        fuse_features = self.gfm0(image_features[0], traj_features[0], self.init_feature)
+        fuse_features = self.gfm0(image_features[0], traj_features[0], self.init_feature.expand(B, -1 ,-1, -1))
         fuse_features = self.gfm1(image_features[1], traj_features[1], fuse_features)
         fuse_features = self.gfm2(image_features[2], traj_features[2], fuse_features)
         fuse_features = self.gfm3(image_features[3], traj_features[3], fuse_features)

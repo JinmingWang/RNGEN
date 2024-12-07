@@ -71,9 +71,9 @@ class RoadNetworkDataset():
             self.heatmaps = dataset["heatmaps"][slicing]
             self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
 
-        self.L_traj = dataset["traj_lens"]
-        self.L_route = dataset["route_lens"]
-        self.N_segs = dataset["seg_nums"]
+        self.L_traj = dataset["traj_lens"].to(torch.int32)
+        self.L_route = dataset["route_lens"].to(torch.int32)
+        self.N_segs = dataset["seg_nums"].to(torch.int32)
 
         self.mean_norm = dataset["point_mean"]
         self.std_norm = dataset["point_std"]
@@ -122,6 +122,9 @@ class RoadNetworkDataset():
         batch["trajs"] += point_shift * (batch["trajs"] != 0)
         batch["routes"] += point_shift.unsqueeze(1) * (batch["routes"] != 0)
         batch["segs"] += point_shift * (batch["segs"] != 0)
+        if self.need_nodes:
+            batch["nodes"] += point_shift.squeeze(1) * (batch["nodes"] != 0)
+            batch["edges"] = batch["edges"].unflatten(-1, (-1, 2)) + point_shift.unsqueeze(1)
 
         if np.random.rand() < 0.5:
             batch["trajs"][..., 0] = -batch["trajs"][..., 0]
@@ -151,6 +154,9 @@ class RoadNetworkDataset():
         batch["trajs"] = torch.einsum("bij,bnlj->bnli", rot_matrix, batch["trajs"])
         batch["routes"] = torch.einsum("bij,bnlkj->bnlki", rot_matrix, batch["routes"])
         batch["segs"] = torch.einsum("bij,bnlj->bnli", rot_matrix, batch["segs"])
+        if self.need_nodes:
+            batch["nodes"] = torch.einsum("bij,bnj->bni", rot_matrix, batch["nodes"])
+            batch["edges"] = torch.einsum("bij,bhwnj->bhwni", rot_matrix, batch["edges"]).flatten(-2, -1)
 
         return batch
 
@@ -202,9 +208,10 @@ class RoadNetworkDataset():
 
         if self.need_nodes:
             batch_data["nodes"] = self.nodes[idx].to(DEVICE)
-            batch_data["adj_mats"] = self.adj_mats[idx].to(DEVICE)
+            batch_data["adj_mat"] = self.adj_mats[idx].to(DEVICE)
             batch_data["edges"] = self.edges[idx].to(DEVICE)
             batch_data["N_nodes"] = self.N_nodes[idx].to(DEVICE)
+            batch_data["degrees"] = self.degrees[idx].to(DEVICE)
 
         if self.enable_aug:
             return self.augmentation(batch_data)
@@ -217,15 +224,26 @@ class RoadNetworkDataset():
             self.trajs = self.trajs[shuffled_indices].contiguous()
             self.routes = self.routes[shuffled_indices].contiguous()
             self.segs = self.segs[shuffled_indices].contiguous()
-            self.images = self.images[shuffled_indices].contiguous()
-            self.heatmaps = self.heatmaps[shuffled_indices].contiguous()
-            self.target_heatmaps = self.target_heatmaps[shuffled_indices].contiguous()
             self.L_traj = self.L_traj[shuffled_indices].contiguous()
             self.L_route = self.L_route[shuffled_indices].contiguous()
             self.N_segs = self.N_segs[shuffled_indices].contiguous()
             self.mean_norm = self.mean_norm[shuffled_indices].contiguous()
             self.std_norm = self.std_norm[shuffled_indices].contiguous()
             self.bboxes = self.bboxes[shuffled_indices].contiguous()
+
+            if self.need_image:
+                self.images = self.images[shuffled_indices].contiguous()
+
+            if self.need_heatmap:
+                self.heatmaps = self.heatmaps[shuffled_indices].contiguous()
+                self.target_heatmaps = self.target_heatmaps[shuffled_indices].contiguous()
+
+            if self.need_nodes:
+                self.nodes = self.nodes[shuffled_indices].contiguous()
+                self.adj_mats = self.adj_mats[shuffled_indices].contiguous()
+                self.edges = self.edges[shuffled_indices].contiguous()
+                self.N_nodes = self.N_nodes[shuffled_indices].contiguous()
+                self.degrees = self.degrees[shuffled_indices].contiguous()
 
         if self.drop_last:
             end = self.N_data - self.N_data % self.batch_size
@@ -292,13 +310,26 @@ class RoadNetworkDataset():
 
     def segmentsToNodesAdj(self) -> None:
         B, N_segs, N_interp, _ = self.segs.shape
-        nodes_pad_len = N_segs * 2
         nodes_padded = []
         adj_padded = []
         edges_padded = []
         nodes_counts = []
 
-        for i in tqdm(range(len(self)), desc="Building Nodes and Adjacency Matrices"):
+        for i in range(self.N_data):
+            segs = self.segs[i]  # Shape: (N_segs, N_interp, 2)
+            # Reshape to (2 * N, 2) to get all endpoints
+            end_points = segs[:, [0, -1], :].flatten(0, 1)  # (2N, 2)
+
+            # Extract unique nodes (2D points)
+            unique_nodes, inverse_indices = torch.unique(end_points, dim=0, return_inverse=True)
+            num_nodes = unique_nodes.shape[0]
+            nodes_counts.append(num_nodes)
+
+        self.N_nodes = torch.tensor(nodes_counts, dtype=torch.long)
+        max_node_count = self.N_nodes.max()
+        self.max_N_nodes = max_node_count
+
+        for i in tqdm(range(self.N_data), desc="Building Nodes and Adjacency Matrices"):
             segs = self.segs[i]  # Shape: (N_segs, N_interp, 2)
             # Reshape to (2 * N, 2) to get all endpoints
             end_points = segs[:, [0, -1], :].flatten(0, 1)  # (2N, 2)
@@ -309,14 +340,14 @@ class RoadNetworkDataset():
 
             nodes_counts.append(num_nodes)
 
-            node_tensor = torch.zeros((nodes_pad_len, 2))
+            node_tensor = torch.zeros((max_node_count, 2))
             node_tensor[:num_nodes, :2] = unique_nodes
 
             nodes_padded.append(node_tensor)
 
             # Initialize adjacency matrix of size (nodes_pad_len, nodes_pad_len)
-            adj_matrix = torch.zeros((nodes_pad_len, nodes_pad_len), dtype=torch.int32)
-            edge_feature_matrix = torch.zeros((nodes_pad_len, nodes_pad_len, 16), dtype=torch.float32)
+            adj_matrix = torch.zeros((max_node_count, max_node_count), dtype=torch.int32)
+            edge_feature_matrix = torch.zeros((max_node_count, max_node_count, 16), dtype=torch.float32)
 
             # Fill adjacency matrix
             for j in range(N_segs):
@@ -327,24 +358,17 @@ class RoadNetworkDataset():
                 adj_matrix[p2_idx, p1_idx] = 1  # Undirected segs
 
                 # edge feature is the corresponding segment
-                edge_feature_matrix[p1_idx, p2_idx] = segs[j]
+                edge_feature_matrix[p1_idx, p2_idx] = segs[j].flatten()
+                edge_feature_matrix[p2_idx, p1_idx] = segs[j].flip(0).flatten()
 
             adj_padded.append(adj_matrix)
             edges_padded.append(edge_feature_matrix)
 
         # Convert lists to tensors using torch.stack
-        nodes_padded_tensor = torch.stack(nodes_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, 2)
-        adj_padded_tensor = torch.stack(adj_padded).to(torch.float32).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len)
-        edges_padded_tensor = torch.stack(edges_padded).to(DEVICE)  # Shape: (B, nodes_pad_len, nodes_pad_len, 16)
-        nodes_count_tensor = torch.tensor(nodes_counts, dtype=torch.long, device=DEVICE)
-
-        max_node_count = nodes_count_tensor.max()
-        self.max_N_nodes = max_node_count
-
-        self.nodes = nodes_padded_tensor[:, :max_node_count]
-        self.adj_mats = adj_padded_tensor[:, :max_node_count, :max_node_count]
-        self.edges = edges_padded_tensor[:, :max_node_count, :max_node_count]
-        self.N_nodes = nodes_count_tensor
+        self.nodes = torch.stack(nodes_padded)  # Shape: (B, nodes_pad_len, 2)
+        self.adj_mats = torch.stack(adj_padded).to(torch.float32)  # Shape: (B, nodes_pad_len, nodes_pad_len)
+        self.edges = torch.stack(edges_padded)  # Shape: (B, nodes_pad_len, nodes_pad_len, 16)
+        self.degrees = torch.sum(self.adj_mats, dim=-1)     # (B, nodes_pad_len)
 
 
     @staticmethod
@@ -413,8 +437,3 @@ class RoadNetworkDataset():
                                 thickness=line_width)
 
         self.target_heatmaps = torch.tensor(target_heatmaps, dtype=torch.float32, device=DEVICE)
-
-
-    @staticmethod
-    def heatmapsToSegments(heatmaps: Float[Tensor, "B 1 H W"]):
-        pass

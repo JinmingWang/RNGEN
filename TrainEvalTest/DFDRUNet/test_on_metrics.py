@@ -20,11 +20,11 @@ def test():
                                  img_W=256
                                  )
 
-    model = DFDRUNet(d_in=4, H=256, W=256).to(DEVICE)
+    model = DFDRUNet().to(DEVICE)
 
     node_extractor = NodeExtractor().to(DEVICE)
 
-    loadModels()
+    loadModels("Runs/DFDRUNet/241201_1533_initial/last.pth", ADLinkedNet=model)
     loadModels("Runs/NodeExtractor/241126_2349_initial/last.pth", node_model=node_extractor)
 
     model.eval()
@@ -40,7 +40,7 @@ def test():
         for batch in tqdm(dataset, desc="Testing"):
 
             with torch.no_grad():
-                pred_heatmap = model(torch.cat([batch["heatmap"], batch["image"]], dim=1))
+                pred_heatmap = model(batch["image"], batch["heatmap"])
                 pred_nodemap = node_extractor(pred_heatmap)
 
             batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)

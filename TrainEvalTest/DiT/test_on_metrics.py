@@ -67,7 +67,8 @@ def test():
                                  enable_aug=False,
                                  shuffle=False,
                                  img_H=256,
-                                 img_W=256
+                                 img_W=256,
+                                 need_heatmap=True
                                  )
 
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
@@ -80,33 +81,33 @@ def test():
                     L_route=dataset.max_L_route,
                     L_traj=dataset.max_L_traj,
                     d_context=2,
-                    n_layers=6,
+                    n_layers=8,
                     T=T).to(DEVICE)
-    loadModels("Runs/PathsDiT/241125_2244_Sparse/last.pth", PathsDiT=DiT)
+    #loadModels("Runs/RoutesDiT/241129_0108_300M/last.pth", DiT=DiT)
+    loadModels("Runs/RoutesDiT/241129_2126_295M/last.pth", DiT=DiT)
 
-    state_dict = torch.load("Runs/PathsDiT/241128_0811_KL1e-6/last.pth")
-    DiT.load_state_dict(state_dict)
-    DiT.eval()
+    # state_dict = torch.load("Runs/PathsDiT/241128_0811_KL1e-6/last.pth")
+    # DiT.load_state_dict(state_dict)
+    # DiT.eval()
 
     ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
 
     titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
                 "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
 
-    name = "DiT_KL1e-6"
+    name = "DiT_295M"
 
     with open(f"Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
-            B = batch["segs"].shape[0]
 
-            batch_segs = batch["segs"]  # (B, N_segs, N_interp, 2)
-            max_point = torch.max(batch_segs.view(B, -1, 2), dim=1).values.view(B, 1, 1, 2)
-            min_point = torch.min(batch_segs.view(B, -1, 2), dim=1).values.view(B, 1, 1, 2)
+            batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
+            max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
             point_range = max_point - min_point
             norm_segs = []
             for b, segs in enumerate(batch_segs):
-                norm_segs.append((segs[:batch["N_segs"][b]] - min_point[b]) / point_range[b])
+                norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
 
 
             with torch.no_grad():
@@ -120,12 +121,14 @@ def test():
             # plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
             # plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
 
+            norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
+            max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            point_range = max_point - min_point
+
             pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
             for i in range(len(coi_means)):
-                max_point = torch.max(coi_means[i].view(-1, 2), dim=0).values.view(1, 1, 2)
-                min_point = torch.min(coi_means[i].view(-1, 2), dim=0).values.view(1, 1, 2)
-                point_range = max_point - min_point
                 coi_means[i] = ((coi_means[i] - min_point) / point_range)
 
             batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"], coi_means, norm_segs)

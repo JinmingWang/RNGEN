@@ -36,14 +36,11 @@ def train():
                     L_route=dataset.max_L_route,
                     L_traj=dataset.max_L_traj,
                     d_context=2,
-                    n_layers=6,
+                    n_layers=8,
                     T=T)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(DiT)
-
-    # state_dict = torch.load("Runs/PathsDiT/241125_2244_Sparse/last.pth")["PathsDiT"]
-    # DiT.load_state_dict(state_dict)
 
     DiT = DiT.to(DEVICE)
 

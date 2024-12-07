@@ -9,8 +9,8 @@ LR_REDUCE_FACTOR = 0.5
 LR_REDUCE_PATIENCE = 10
 LR_REDUCE_MIN = 1e-7
 LR_REDUCE_THRESHOLD = 1e-5
-EPOCHS = 500
-B = 16
+EPOCHS = 700
+B = 32
 LOG_DIR = f"./Runs/DFDRUNet/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{COMMENT}/"
 
 # Logging Parameters

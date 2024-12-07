@@ -12,7 +12,22 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import GraphusionVAE, ClusterLoss, KLLoss
+from Models import GraphusionVAE, KLLoss
+
+def nodesAdjMatToSegs(f_nodes, adj_mat, f_edges, threahold=0.5):
+    B = f_nodes.shape[0]
+    batch_segs = []
+    for b in range(B):
+        segs = []
+        for r in range(adj_mat.shape[1]):
+            for c in range(r + 1, adj_mat.shape[2]):
+                if adj_mat[b, r, c] >= threahold:
+                    segs.append(f_edges[b, r, c].view(8, 2))
+        if len(segs) == 0:
+            batch_segs.append(torch.zeros(1, 8, 2, dtype=torch.float32, device=DEVICE))
+        else:
+            batch_segs.append(torch.stack(segs, dim=0))     # (N_segs, 8, 2)
+    return batch_segs
 
 
 def train():
@@ -27,9 +42,12 @@ def train():
                                  need_nodes=True
                                  )
 
-    vae = GraphusionVAE(n_nodes=dataset.max_N_nodes, d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_heads=8).to(DEVICE)
+    vae = GraphusionVAE(d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_layers=8, n_heads=8).to(DEVICE)
+
+    loadModels("Runs/GraphusionVAE/241205_2212_initial/last.pth", vae=vae)
 
     rec_loss_func = torch.nn.MSELoss()
+    mat_loss_func = torch.nn.BCELoss()
     kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
 
     # Optimizer & Scheduler
@@ -42,12 +60,15 @@ def train():
         os.makedirs(LOG_DIR, exist_ok=True)
     writer = SummaryWriter(log_dir=LOG_DIR)
     mov_avg_kll = MovingAvg(MOV_AVG_LEN * len(dataset))
-    mov_avg_rec = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_node = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_edge = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_adj = MovingAvg(MOV_AVG_LEN * len(dataset))
+    mov_avg_deg = MovingAvg(MOV_AVG_LEN * len(dataset))
     global_step = 0
     best_loss = float("inf")
-    plot_manager = PlotManager(4, 1, 3)
+    plot_manager = PlotManager(4, 1, 4)
 
-    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["KLL", "REC", "lr"]) as progress:
+    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["KLL", "NODE", "EDGE", "ADJ", "DEG", "lr"]) as progress:
         for e in range(EPOCHS):
             total_loss = 0
             for i, batch in enumerate(dataset):
@@ -65,11 +86,11 @@ def train():
                 z_mean, z_logvar, f_nodes, f_edges, pred_adj_mat, pred_degrees = vae(batch["nodes"], batch["edges"], batch["adj_mat"])
 
                 kll = kl_loss_func(z_mean, z_logvar)
-                rec = (rec_loss_func(f_nodes, batch["nodes"]) +
-                       rec_loss_func(f_edges, batch["edges"]) +
-                       rec_loss_func(pred_adj_mat, batch["adj_mat"]) +
-                       rec_loss_func(pred_degrees, batch["degrees"]))
-                loss = kll + rec
+                loss_nodes = rec_loss_func(f_nodes, batch["nodes"])
+                loss_edges = rec_loss_func(f_edges, batch["edges"])
+                loss_adj_mat = mat_loss_func(pred_adj_mat, batch["adj_mat"])
+                loss_degree = rec_loss_func(pred_degrees, batch["degrees"])
+                loss = kll + loss_nodes + loss_adj_mat + loss_edges + loss_degree
 
                 # Backpropagation
                 loss.backward()
@@ -80,28 +101,40 @@ def train():
 
                 total_loss += loss
                 global_step += 1
-                mov_avg_kll.update(kll)
-                mov_avg_rec.update(rec)
+                mov_avg_kll.update(kll.item())
+                mov_avg_node.update(loss_nodes.item())
+                mov_avg_edge.update(loss_edges.item())
+                mov_avg_adj.update(loss_adj_mat.item())
+                mov_avg_deg.update(loss_degree.item())
+
 
                 # Progress update
                 progress.update(e, i,
                                 KLL=mov_avg_kll.get(),
-                                REC=mov_avg_rec.get(),
+                                NODE=mov_avg_node.get(),
+                                EDGE=mov_avg_edge.get(),
+                                ADJ=mov_avg_adj.get(),
+                                DEG=mov_avg_deg.get(),
                                 lr=optimizer.param_groups[0]['lr'])
 
                 # Logging
                 if global_step % LOG_INTERVAL == 0:
                     writer.add_scalar("KLL", mov_avg_kll.get(), global_step)
-                    writer.add_scalar("REC", mov_avg_rec.get(), global_step)
+                    writer.add_scalar("NODE", mov_avg_node.get(), global_step)
+                    writer.add_scalar("EDGE", mov_avg_edge.get(), global_step)
+                    writer.add_scalar("ADJ", mov_avg_adj.get(), global_step)
+                    writer.add_scalar("DEG", mov_avg_deg.get(), global_step)
                     writer.add_scalar("Learning Rate", optimizer.param_groups[0]["lr"], global_step)
 
-            # Compute mean for each cluster
-            #clusters = loss_func.getClusters(pred_segs[0], pred_cluster_mat[0])
+
+            pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threahold=0.5)
+            target_segs = nodesAdjMatToSegs(batch["nodes"][0:1], batch["adj_mat"][0:1], batch["edges"][0:1], threahold=0.5)
 
             # Plot reconstructed segments and graphs
             plot_manager.plotNodesWithAdjMat(batch["nodes"][0], batch["adj_mat"][0], 0, 0, "Nodes")
-            plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
-            plot_manager.plotNodesWithAdjMat(f_nodes[0], pred_adj_mat[0], 0, 2, "Reconstructed Nodes")
+            plot_manager.plotSegments(target_segs[0], 0, 1, "Segs", color="blue")
+            plot_manager.plotNodesWithAdjMat(f_nodes[0], pred_adj_mat[0] > 0.5, 0, 2, "Pred Graph")
+            plot_manager.plotSegments(pred_segs[0], 0, 3, "Pred Segments", color="red")
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 

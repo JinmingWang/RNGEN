@@ -1,5 +1,5 @@
 from Dataset import RoadNetworkDataset
-from TrainEvalTest.GlobalConfigs import *
+from TrainEvalTest.GraphusionVAE.train import nodesAdjMatToSegs
 from TrainEvalTest.Graphusion.configs import *
 from TrainEvalTest.Utils import *
 from Models import Graphusion, GraphusionVAE
@@ -35,11 +35,11 @@ def getEvalFunction(vae: GraphusionVAE) -> Callable:
     batch = test_set[0:B]
 
     with torch.no_grad():
-        latent, _ = vae(batch["nodes"], batch["edges"], batch["adj_mat"])
+        latent, _ = vae.encode(batch["nodes"], batch["edges"], batch["adj_mat"])
 
     latent_noise = torch.randn_like(latent)
 
-    plot_manager = PlotManager(4, 1, 4)
+    plot_manager = PlotManager(4, 1, 5)
 
     loss_func = torch.nn.MSELoss()
 
@@ -56,10 +56,13 @@ def getEvalFunction(vae: GraphusionVAE) -> Callable:
                 loss_func(pred_adj_mat, batch["adj_mat"]) +
                 loss_func(pred_degrees, batch["degrees"]))
 
+        pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threahold=0.5)
+
         plot_manager.plotNodesWithAdjMat(batch["nodes"][0], batch["adj_mat"][0], 0, 0, "Nodes")
         plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
         plot_manager.plotNodesWithAdjMat(f_nodes[0], pred_adj_mat[0], 0, 2, "Reconstructed Nodes")
         plot_manager.plotTrajs(batch["trajs"][0], 0, 3, "Trajectories")
+        plot_manager.plotSegments(pred_segs[0], 0, 4, "Pred Segments", color="red")
 
         graphusion.train()
 

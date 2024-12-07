@@ -26,7 +26,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
                                  batch_size=10,
                                  drop_last=True,
                                  set_name="test",
-                                 enable_aug=True,
+                                 enable_aug=False,
                                  img_H=16,
                                  img_W=16
                                  )

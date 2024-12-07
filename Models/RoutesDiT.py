@@ -104,7 +104,7 @@ class RoutesDiT(nn.Module):
         )
 
         self.stages = SequentialWithAdditionalInputs(*[
-            Block(N_routes, L_route, 256, 256, 256, 256, 8)
+            Block(N_routes, L_route, 256, 256, 256, 256, 8, dropout=0.1)
             for _ in range(n_layers)
         ])
 

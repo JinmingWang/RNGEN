@@ -27,29 +27,28 @@ def train():
                                  )
 
     # Models
-    vae = GraphusionVAE(n_nodes=dataset.max_N_nodes, d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_heads=8).to(DEVICE)
-    loadModels("Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth", vae=vae)
+    vae = GraphusionVAE(d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_layers=8, n_heads=8).to(DEVICE)
+    loadModels("Runs/GraphusionVAE/241206_1058_initial/last.pth", vae=vae)
     vae.eval()
 
     graphusion = Graphusion(D_in=128,
-                    L_enc=dataset.max_N_nodes,
-                    N_trajs=dataset.N_trajs,
-                    L_traj=dataset.max_L_traj,
-                    d_context=2,
-                    n_layers=6,
-                    T=T)
+                            L_enc=dataset.max_N_nodes,
+                            N_trajs=dataset.N_trajs,
+                            L_traj=dataset.max_L_traj,
+                            d_context=2,
+                            n_layers=6,
+                            T=T)
 
     torch.set_float32_matmul_precision("high")
     torch.compile(graphusion)
 
-    # state_dict = torch.load("Runs/PathsDiT/241125_2244_Sparse/last.pth")["PathsDiT"]
-    # DiT.load_state_dict(state_dict)
+    loadModels("Runs/Graphusion/241206_2341_initial/last.pth", graphusion=graphusion)
 
     graphusion = graphusion.to(DEVICE)
 
     eval = getEvalFunction(vae)
 
-    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
+    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=2)
     loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
@@ -72,7 +71,7 @@ def train():
                 batch: Dict[str, Tensor]
 
                 with torch.no_grad():
-                    latent, _ = vae(batch["nodes"], batch["edges"], batch["adj_mat"])    # (B, N_nodes, 128)
+                    latent, _ = vae.encode(batch["nodes"], batch["edges"], batch["adj_mat"])    # (B, N_nodes, 128)
 
                 latent_noise = torch.randn_like(latent)
 

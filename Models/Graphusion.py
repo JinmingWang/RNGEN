@@ -1,11 +1,95 @@
 from .Basics import *
 
+
+class GraphusionSelfAttn(nn.Module):
+    def __init__(self,
+                 d_in: int,
+                 d_head: int,
+                 d_expand: int,
+                 d_out: int,
+                 n_heads: int,
+                 dropout: float = 0.1,
+                 score: Literal["prod", "dist"] = "dist",
+                 d_time: int = 0):
+        super(GraphusionSelfAttn, self).__init__()
+
+        self.H = n_heads
+        self.d_head = d_head
+        self.d_expand = d_expand
+        self.d_in = d_in
+        self.score = score
+        self.d_time = d_time
+        self.scale = nn.Parameter(torch.tensor(d_head if score == "prod" else 1.414, dtype=torch.float32))
+        self.dropout = nn.Dropout(dropout)
+
+        self.d_q = d_head * n_heads
+        self.d_k = d_head * n_heads
+        self.d_v = d_in * n_heads
+        d_qkv = self.d_q + self.d_k + self.d_v
+
+        self.qkv_proj = nn.Sequential(
+            nn.LayerNorm(d_in),
+            Swish(),
+            nn.Linear(d_in, d_qkv)
+        )
+
+        self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
+        torch.nn.init.zeros_(self.merge_head_proj.weight)
+        torch.nn.init.zeros_(self.merge_head_proj.bias)
+
+        if d_time == 0:
+            self.ff = nn.Sequential(
+                nn.LayerNorm(d_in), Swish(),
+                nn.Linear(d_in, d_expand),
+                Swish(), nn.Dropout(dropout),
+                nn.Linear(d_expand, d_out),
+            )
+            torch.nn.init.zeros_(self.ff[-1].weight)
+            torch.nn.init.zeros_(self.ff[-1].bias)
+        else:
+            self.time_proj = nn.Sequential(
+                nn.Linear(d_time, d_time),
+                Swish(),
+                nn.Linear(d_time, d_in + d_expand)
+            )
+            self.ff1 = nn.Sequential(nn.LayerNorm(d_in), Swish(), nn.Linear(d_in, d_expand))
+            self.ff2 = nn.Sequential(Swish(), nn.Dropout(dropout), nn.Linear(d_expand, d_out))
+            torch.nn.init.zeros_(self.ff2[-1].weight)
+            torch.nn.init.zeros_(self.ff2[-1].bias)
+
+        self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
+
+    def forward(self, x, t=None):
+        B, N, in_c = x.shape
+
+        q, k, v = self.qkv_proj(x).split([self.d_q, self.d_k, self.d_v], dim=-1)
+        q = rearrange(q, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
+        k = rearrange(k, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, head_c, N)
+        v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
+
+        # attn shape: (B*H, N, N)
+        if self.score == "prod":
+            attn = torch.softmax(q @ k.transpose(-1, -2) * (self.scale ** -0.5), dim=-1)
+        else:
+            attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
+        attn = self.dropout(attn)
+
+        # out shape: (B, N, H*in_c)
+        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        x = x + self.merge_head_proj(out)
+
+        if self.d_time == 0:
+            return self.ff(x) + self.shortcut(x)
+        else:
+            t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
+            return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
+
+
 class Block(nn.Module):
     def __init__(self,
-                 l_enc: int,
                  d_in: int,
                  d_out: int,
-                 d_context: int,
+                 d_ctx: int,
                  d_time: int,
                  n_heads: int = 8,
                  dropout: float = 0.0,
@@ -14,7 +98,7 @@ class Block(nn.Module):
 
         self.d_in = d_in
         self.d_out = d_out
-        self.d_context = d_context
+        self.d_ctx = d_ctx
         self.n_heads = n_heads
         self.dropout = dropout
 
@@ -23,25 +107,28 @@ class Block(nn.Module):
             Swish()
         )
 
-        self.cross_attn = CrossAttnBlock(
+        self.ca = CrossAttnBlock(
             d_in=d_in,
-            d_context=d_context,
+            d_context=d_ctx,
             d_head=64,
-            d_expand=d_in * 2,
-            d_out=d_in,
-            n_heads=self.n_heads,
-            dropout=self.dropout
+            d_expand=d_in*2,
+            d_out=d_in*2,
+            n_heads=n_heads,
+            dropout=dropout,
+            score="prod",
+            d_time=0
         )
 
-        self.attn = AttentionWithTime(
-            l_in=l_enc,
-            d_in=d_in,
+
+        self.sa = GraphusionSelfAttn(
+            d_in=d_in*2,
             d_head=64,
             d_expand=d_in * 2,
-            d_out=d_in,
+            d_out=d_out,
             d_time=d_in,
             n_heads=self.n_heads,
-            dropout=self.dropout
+            dropout=self.dropout,
+            score="prod"
         )
 
         self.out_proj = nn.Sequential(
@@ -53,8 +140,8 @@ class Block(nn.Module):
 
     def forward(self, x, context, t):
         residual = self.shortcut(x)
-        x = self.cross_attn(x, context)
-        x = self.attn(x, self.time_proj(t))
+        x = self.ca(x, context)
+        x = self.sa(x, self.time_proj(t))
         return self.out_proj(x) + residual
 
 
@@ -82,8 +169,8 @@ class Graphusion(nn.Module):
 
         self.x_proj = nn.Sequential(
             nn.Linear(D_in, 128),
-            AttentionBlock(L_enc, 128, 64, 256, 256, 8),
-            AttentionBlock(L_enc, 256, 64, 256, 256, 8),
+            GraphusionSelfAttn(128, 64, 256, 256, 8, score="prod"),
+            GraphusionSelfAttn(256, 64, 256, 256, 8, score="prod"),
         )
 
         self.traj_proj = nn.Sequential(
@@ -97,12 +184,12 @@ class Graphusion(nn.Module):
             # Attention among all traj tokens
             Rearrange("(B N) D L", "B N (L D)", N=N_trajs),
             nn.Linear(L_traj // 4 * 256, 256),
-            AttentionBlock(N_trajs, 256, 64, 512, 256, 4),
-            AttentionBlock(N_trajs, 256, 64, 512, 256, 4),
+            GraphusionSelfAttn(256, 64, 512, 256, 4, score="prod"),
+            GraphusionSelfAttn(256, 64, 512, 256, 4, score="prod"),
         )
 
         self.stages = SequentialWithAdditionalInputs(*[
-            Block(L_enc, 256, 256, 256, 256, 8)
+            Block(256, 256, 256, 256, 8)
             for _ in range(n_layers)
         ])
 

@@ -5,6 +5,7 @@ from einops import rearrange
 from jaxtyping import Float, Bool
 from typing import List, Literal, Tuple
 from inspect import getfullargspec
+import math
 
 Tensor = torch.Tensor
 
@@ -108,29 +109,33 @@ class AttentionBlock(nn.Module):
 
 
 class CrossAttnBlock(nn.Module):
-    def __init__(self, d_in: int, d_context: int, d_head: int, d_expand: int,
-                 d_out: int, n_heads: int, dropout: float=0.1):
+    def __init__(self,
+                 d_in: int,
+                 d_context: int,
+                 d_head: int,
+                 d_expand: int,
+                 d_out: int,
+                 n_heads: int,
+                 dropout: float=0.1,
+                 score: Literal["prod", "dist"] = "dist",
+                 d_time: int = 0):
         super(CrossAttnBlock, self).__init__()
 
-        # in shape: (B, N, in_c)
-        # Q shape: (B*H, N, head_c)
-        # K shape: (B*H, N, head_c)
-        # V shape: (B*H, N, in_c)
         self.H = n_heads
         self.d_head = d_head
         self.d_in = d_in
-        self.scale = d_head ** -0.5
+        self.score = score
+        self.d_time = d_time
+        self.scale = nn.Parameter(torch.tensor(d_head if score == "prod" else 1.414, dtype=torch.float32))
         self.dropout = nn.Dropout(dropout)
 
         self.q_proj = nn.Sequential(
-            nn.LayerNorm(d_in),
-            Swish(),
+            nn.LayerNorm(d_in), Swish(),
             nn.Linear(d_in, d_head * n_heads),
         )
 
         self.kv_proj = nn.Sequential(
-            nn.LayerNorm(d_context),
-            Swish(),
+            nn.LayerNorm(d_context), Swish(),
             nn.Linear(d_context, (d_head + d_in) * n_heads),
         )
 
@@ -138,126 +143,54 @@ class CrossAttnBlock(nn.Module):
         torch.nn.init.zeros_(self.merge_head_proj.weight)
         torch.nn.init.zeros_(self.merge_head_proj.bias)
 
-        self.ff = nn.Sequential(
-            nn.LayerNorm(d_in),
-            Swish(),
-            nn.Linear(d_in, d_expand),
-            Swish(),
-            nn.Dropout(dropout),
-            nn.Linear(d_expand, d_out),
-        )
-
-        torch.nn.init.zeros_(self.ff[-1].weight)
-        torch.nn.init.zeros_(self.ff[-1].bias)
+        if d_time == 0:
+            self.ff = nn.Sequential(
+                nn.LayerNorm(d_in), Swish(),
+                nn.Linear(d_in, d_expand),
+                Swish(), nn.Dropout(dropout),
+                nn.Linear(d_expand, d_out),
+            )
+            torch.nn.init.zeros_(self.ff[-1].weight)
+            torch.nn.init.zeros_(self.ff[-1].bias)
+        else:
+            self.time_proj = nn.Sequential(
+                nn.Linear(d_time, d_time),
+                Swish(),
+                nn.Linear(d_time, d_in + d_expand),
+                nn.Unflatten(-1, (1, -1))
+            )
+            self.ff1 = nn.Sequential(nn.LayerNorm(d_in), Swish(), nn.Linear(d_in, d_expand))
+            self.ff2 = nn.Sequential(Swish(), nn.Dropout(dropout), nn.Linear(d_expand, d_out))
+            torch.nn.init.zeros_(self.ff2[-1].weight)
+            torch.nn.init.zeros_(self.ff2[-1].bias)
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
-    def forward(self, x, context):
+    def forward(self, x, context, t=None):
         B, N, in_c = x.shape
 
         q = rearrange(self.q_proj(x), 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
 
         k, v = self.kv_proj(context).split([self.d_head * self.H, in_c * self.H], dim=-1)
-        kt = rearrange(k, 'B N (H C) -> (B H) C N', H=self.H)   # (B*H, head_c, N)
+        k = rearrange(k, 'B N (H C) -> (B H) N C', H=self.H)   # (B*H, head_c, N)
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
 
         # attn shape: (B*H, N, N)
-        attn = torch.bmm(q, kt) * self.scale
-        attn = func.softmax(attn, dim=-1)
+        if self.score == "prod":
+            attn = torch.softmax(q @ k.transpose(-1, -2) * (self.scale  ** -0.5), dim=-1)
+        else:
+            attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
         out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
-        return self.ff(x) + self.shortcut(x)
-
-class CrossAttentionBlockWithTime(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_context: int, d_head: int, d_expand: int,
-                 d_out: int, d_time: int, n_heads: int, dropout: float=0.1):
-        super(CrossAttentionBlockWithTime, self).__init__()
-
-        # in shape: (B, N, in_c)
-        # Q shape: (B*H, N, head_c)
-        # K shape: (B*H, N, head_c)
-        # V shape: (B*H, N, in_c)
-        self.l_in = l_in
-        self.H = n_heads
-        self.d_head = d_head
-        self.d_in = d_in
-        self.d_expand = d_expand
-        self.scale = d_head ** -0.5
-        self.dropout = nn.Dropout(dropout)
-        self.d_time = d_time
-
-        self.ln = nn.LayerNorm(d_in)
-
-        self.pos_enc = nn.Parameter(torch.randn(1, l_in, d_in))
-
-        self.q_proj = nn.Sequential(
-            Swish(),
-            nn.Linear(d_in, d_head * n_heads),
-        )
-
-        self.kv_proj = nn.Sequential(
-            nn.Linear(d_context, d_context),
-            nn.LayerNorm(d_context),
-            Swish(),
-            nn.Linear(d_context, (d_head + d_in) * n_heads),
-        )
-
-        mask = 1 - torch.triu(torch.ones(l_in, l_in))
-        self.register_buffer("mask", mask.unsqueeze(0).to(torch.bool))
-
-        self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
-        torch.nn.init.zeros_(self.merge_head_proj.weight)
-        torch.nn.init.zeros_(self.merge_head_proj.bias)
-
-        self.time_proj = nn.Sequential(
-            nn.Linear(d_time, d_time),
-            Swish(),
-            nn.Linear(d_time, d_in + d_expand),
-            nn.Unflatten(-1, (1, -1))
-        )
-
-        self.ff1 = nn.Sequential(
-            nn.LayerNorm(d_in),
-            Swish(),
-            nn.Linear(d_in, d_expand),
-        )
-
-        self.ff2 = nn.Sequential(
-            Swish(),
-            nn.Dropout(dropout),
-            nn.Linear(d_expand, d_out),
-        )
-
-        torch.nn.init.zeros_(self.ff2[-1].weight)
-        torch.nn.init.zeros_(self.ff2[-1].bias)
-
-        self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
-
-    def forward(self, x, context, t):
-        B, N, in_c = x.shape
-
-        q = rearrange(self.q_proj(self.ln(x) + self.pos_enc), 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
-
-        k, v = self.kv_proj(context).split([self.d_head * self.H, in_c * self.H], dim=-1)
-        kt = rearrange(k, 'B N (H C) -> (B H) C N', H=self.H)   # (B*H, head_c, N)
-        v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
-
-        # attn shape: (B*H, N, N)
-        attn = torch.bmm(q, kt) * self.scale
-        attn.masked_fill_(self.mask, -torch.inf)
-        attn = func.softmax(attn, dim=-1)
-        attn = self.dropout(attn)
-
-        # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = x + self.merge_head_proj(out)
-
-        t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
-        return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
+        if self.d_time == 0:
+            return self.ff(x) + self.shortcut(x)
+        else:
+            t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
+            return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
 
 
 class AttentionWithTime(nn.Module):
@@ -479,48 +412,34 @@ def cacheArgumentsUponInit(original_init):
 
     return __init__
 
-def xyxy2xydl(xyxy: Tensor) -> Tensor:
-    """
-    Convert a segment (x1, y1, x2, y2) to a segment (x_center, y_center, direction, length)
-    Why? Because a segment in x1y1x2y2 format can also be represented in x2y2x1y1 format,
-    this non-uniqueness is problematic. Imagine a segment (x1, y1, x2, y2), if the model predicts
-    (x2, y2, x1, y1) instead, it should be considered correct. Or, if two given segments are (x1, y1, x2, y2) and
-    (x2, y2, x1, y1), the attention mechanism should be able to match them as if they are the same segment.
-    :param xyxy: The segments (B, N, 5), where 5 is (x1, y1, x2, y2, is_valid)
-    :return: The segments in (B, N, 5) format
-    """
-    # Unbind the input tensor to get x1, y1, x2, y2
-    x1, y1, x2, y2 = torch.unbind(xyxy, dim=-1)
 
-    # Compute center coordinates
-    x_c, y_c = (x1 + x2) / 2, (y1 + y2) / 2
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model: int, max_len: int = 5000):
+        """
+        Implements positional encoding for sequence data.
+        :param d_model: Dimensionality of the model/embedding.
+        :param max_len: Maximum length of the sequence.
+        """
+        super(PositionalEncoding, self).__init__()
+        # Create a matrix of shape (max_len, d_model)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # Shape: (max_len, 1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model // 2)
 
-    # Compute the length of each segment
-    lengths = torch.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+        # Compute positional encodings
+        pe[:, 0::2] = torch.sin(position * div_term)  # Apply sin to even indices
+        pe[:, 1::2] = torch.cos(position * div_term)  # Apply cos to odd indices
 
-    # Compute the direction and ensure it's in the range [0, pi)
-    directions = torch.atan2(y2 - y1, x2 - x1)
-    directions = torch.remainder(directions, torch.pi)
+        # Register as a buffer to avoid updates during training
+        self.register_buffer('pe', pe.unsqueeze(0))  # Shape: (1, max_len, d_model)
 
-    # Return the concatenated result
-    return torch.stack([x_c, y_c, directions, lengths], dim=-1)
+        self.proj = nn.Linear(d_model, d_model)
 
-def xydl2xyxy(xydl: Tensor) -> Tensor:
-    """
-    Convert a segment (x_center, y_center, direction, length) to a segment (x1, y1, x2, y2)
-    :param xydl: The segments (B, N, 5), where 5 is (x_center, y_center, direction, length, is_valid)
-    :return: The segments in (B, N, 5) format
-    """
-    # Unbind the input tensor to get x_c, y_c, directions, lengths
-    x_c, y_c, directions, lengths = torch.unbind(xydl, dim=-1)
-
-    # Compute half-length components
-    half_dx = (lengths / 2) * torch.cos(directions)
-    half_dy = (lengths / 2) * torch.sin(directions)
-
-    # Compute x1, y1, x2, y2 based on the center and direction
-    x1, y1 = x_c - half_dx, y_c - half_dy
-    x2, y2 = x_c + half_dx, y_c + half_dy
-
-    # Return the concatenated result
-    return torch.stack([x1, y1, x2, y2], dim=-1)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Add positional encoding to the input tensor.
+        :param x: Input tensor of shape (batch_size, seq_len, d_model).
+        :return: Tensor with positional encodings added, same shape as input.
+        """
+        seq_len = x.size(1)
+        return self.proj(x + self.pe[:, :seq_len])

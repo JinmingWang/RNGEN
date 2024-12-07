@@ -6,7 +6,6 @@ import torch
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import DataLoader
 
 import os
 
@@ -55,7 +54,7 @@ def train():
 
                 optimizer.zero_grad()
 
-                pred_heatmap = model(torch.cat([batch["heatmap"], batch["image"]], dim=1))
+                pred_heatmap = model(batch["image"], batch["heatmap"])
 
                 loss = loss_func(pred_heatmap, batch["target_heatmaps"])
 

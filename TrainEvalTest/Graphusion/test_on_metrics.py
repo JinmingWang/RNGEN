@@ -76,11 +76,12 @@ def test():
     dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
                                  batch_size=B,
                                  drop_last=True,
-                                 set_name="train",
+                                 set_name="Test",
                                  enable_aug=True,
                                  img_H=16,
                                  img_W=16,
-                                 need_nodes=True
+                                 need_nodes=True,
+                                 need_heatmap=True
                                  )
 
     # Models
@@ -137,15 +138,15 @@ def test():
             pred_segs = nodesAdjMatToSegs(f_nodes, pred_adj_mat, f_edges)
 
 
-            norm_pred_segs = pred_segs  # (B, N_segs, N_interp, 2)
+            norm_pred_segs = torch.cat(pred_segs, dim=0)  # (B, N_segs, N_interp, 2)
             max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
             min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
             point_range = max_point - min_point
 
             pred_heatmaps = segsToHeatmaps(pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
-            for i in range(len(coi_means)):
-                coi_means[i] = ((coi_means[i] - min_point) / point_range)
+            for i in range(len(pred_segs)):
+                pred_segs[i] = ((pred_segs[i] - min_point) / point_range)
 
             batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"], coi_means, norm_segs)
 
