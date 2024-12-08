@@ -15,7 +15,7 @@ from Models import UNet2D
 
 def train(
         title: str = "initial",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         lr: float = 2e-4,
         lr_reduce_factor: float = 0.5,
         lr_reduce_patience: int = 30,
@@ -36,7 +36,8 @@ def train(
                                  permute_seq=False,
                                  enable_aug=False,
                                  img_H=256,
-                                 img_W=256
+                                 img_W=256,
+                                 need_heatmap=True
                                  )
 
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)

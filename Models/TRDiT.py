@@ -3,7 +3,6 @@ from .Basics import *
 class Block(nn.Module):
     def __init__(self,
                  n_paths: int,
-                 l_path: int,
                  d_in: int,
                  d_out: int,
                  d_context: int,
@@ -32,8 +31,7 @@ class Block(nn.Module):
             Rearrange("(B N) D L", "B (N L) D", N=n_paths)
         )
 
-        self.attn = AttentionWithTime(
-            l_in=n_paths * l_path,
+        self.attn = AttentionBlock(
             d_in=d_mid,
             d_head=64,
             d_expand=d_mid * 2,
@@ -59,7 +57,7 @@ class Block(nn.Module):
         return self.out_proj(x) + residual
 
 
-class RoutesDiT(nn.Module):
+class TRDiT(nn.Module):
     def __init__(self, D_in: int, N_routes: int, L_route: int, L_traj: int, d_context: int, n_layers: int, T: int):
         super().__init__()
         self.D_in = D_in
@@ -99,12 +97,12 @@ class RoutesDiT(nn.Module):
 
             # Attention among all traj tokens
             Rearrange("(B N) D L", "B (N L) D", N=N_routes),
-            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
-            AttentionBlock(L_traj//2 * N_routes, 256, 64, 512, 256, 4),
+            AttentionBlock(256, 64, 512, 256, 4),
+            AttentionBlock(256, 64, 512, 256, 4),
         )
 
         self.stages = SequentialWithAdditionalInputs(*[
-            Block(N_routes, L_route, 256, 256, 256, 256, 8, dropout=0.1)
+            Block(N_routes, 256, 256, 256, 256, 8, dropout=0.1)
             for _ in range(n_layers)
         ])
 

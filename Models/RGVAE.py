@@ -72,69 +72,7 @@ class DRAC(nn.Module):
         return cluster_means, coi_means
 
 
-class CDVAE_Attn(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int):
-        super(CDVAE_Attn, self).__init__()
-
-        # in shape: (B, N, in_c)
-        # Q shape: (B*H, N, head_c)
-        # K shape: (B*H, N, head_c)
-        # V shape: (B*H, N, in_c)
-        self.H = n_heads
-        self.d_head = d_head
-        self.d_in = d_in
-        self.l_in = l_in
-        self.scale = nn.Parameter(torch.tensor(1.414))
-
-        self.d_a = d_head * n_heads
-        self.d_v = d_in * n_heads
-
-        self.fn = FeatureNorm(d_in)
-
-        self.pos_enc = nn.Parameter(torch.randn(1, l_in, d_in))
-
-        self.proj = nn.Sequential(
-            Swish(),
-            nn.Linear(d_in, self.d_a + self.d_v),
-        )
-
-        self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
-
-        torch.nn.init.zeros_(self.merge_head_proj.weight)
-        torch.nn.init.zeros_(self.merge_head_proj.bias)
-
-        self.ff = nn.Sequential(
-            FeatureNorm(d_in),
-            Swish(),
-            nn.Linear(d_in, d_expand),
-            FeatureNorm(d_expand),
-            Swish(),
-            nn.Linear(d_expand, d_out),
-        )
-
-        torch.nn.init.zeros_(self.ff[-1].weight)
-        torch.nn.init.zeros_(self.ff[-1].bias)
-
-        self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
-
-    def forward(self, x):
-        B, N, in_c = x.shape
-
-        a, v = self.proj(self.fn(x) + self.pos_enc).split([self.d_a, self.d_v], dim=-1)
-        a = rearrange(a, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
-        v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
-
-        # attn shape: (B*H, N, N)
-        score = torch.exp( - torch.cdist(a, a) ** 2 / self.scale ** 2)
-
-        # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(score, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = x + self.merge_head_proj(out)
-
-        return self.ff(x) + self.shortcut(x)
-
-
-class CrossDomainVAE(nn.Module):
+class RGVAE(nn.Module):
     def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
         self.N_routes = N_routes
@@ -159,8 +97,8 @@ class CrossDomainVAE(nn.Module):
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
 
-            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8),
-            CDVAE_Attn(self.N_segs, 256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
+            AttentionBlock(256, 64, 512, 256, 8),
 
             Rearrange("B (N_routes L_route) D", "B N_routes L_route D", N_routes=N_routes),
         )
@@ -169,7 +107,7 @@ class CrossDomainVAE(nn.Module):
         self.logvar_head = nn.Linear(256, 2 * N_interp)
 
         attn_params = {
-            "l_in": self.N_segs, "d_in": 384, "d_head": 64, "d_expand": 768, "d_out": 384,
+            "d_in": 384, "d_head": 64, "d_expand": 768, "d_out": 384,
             "n_heads": 8
         }
 
@@ -185,18 +123,18 @@ class CrossDomainVAE(nn.Module):
             nn.Conv1d(128, 384, 1, 1, 0),
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
-            *[CDVAE_Attn(**attn_params) for _ in range(6)],
+            *[AttentionBlock(**attn_params) for _ in range(6)],
         )
 
         self.segs_head = nn.Sequential(
-            CDVAE_Attn(**attn_params),
+            AttentionBlock(**attn_params),
             nn.Linear(384, 128),
             Swish(),
             nn.Linear(128, N_interp * 2)
         )
 
         self.cluster_head = nn.Sequential(
-            CDVAE_Attn(**attn_params),
+            AttentionBlock(**attn_params),
             MultiHeadSelfRelationMatrix(384, 64, 16), # (B, L, L)
             nn.Sigmoid()
         )

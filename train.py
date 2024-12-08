@@ -7,20 +7,24 @@ from TrainEvalTest.GraphusionVAE.train import train as train_GraphusionVAE
 from TrainEvalTest.Graphusion.train import train as train_Graphusion
 from TrainEvalTest.NodeExtractor.train import train as train_NodeExtractor
 
-dataset = "Tokyo_10k_sparse"
+dataset = "Tokyo"
 
 default_params = {
     "dataset_path": f"Dataset/{dataset}",
     "lr": 2e-4,
     "lr_reduce_factor": 0.5,
     "lr_reduce_patience": 30,
-    "lr_reduce_min": 1e-7,
+    "lr_reduce_min": 1e-6,
     "lr_reduce_threshold": 1e-5,
     "epochs": 1000,
     "B": 32,
     "mov_avg_len": 5,
     "log_interval": 10,
 }
+
+### For fine-tunning
+default_params["lr"] = 1e-4
+default_params["epochs"] = 1
 
 vae_params = {k: v for k, v in default_params.items()}
 vae_params["lr"] = 1e-4
@@ -38,35 +42,36 @@ if __name__ == "__main__":
     train_DFDRUNet(
         title=dataset,
         **default_params,
-        load_weights=None
+        load_weights="Runs/DFDRUNet/241201_1533_initial/last.pth"
     )
 
     print("Start Training TR2RM (AD-Linked Net)")   # ------------------------------------------- TR2RM
-    train_TR2RM(
+    heatmap_model_path = train_TR2RM(
         title=dataset,
         **default_params,
-        load_weights=None
+        load_weights="Runs/TR2RM/241124_1849_sparse/last.pth"
     )
 
     print("Start Training SmallMap (UNet)")  # ------------------------------------------- SmallMapUNet
     train_SmallMap(
         title=dataset,
         **default_params,
-        load_weights=None
+        load_weights="Runs/SmallMapUNet/241124_1849_sparse/last.pth"
     )
 
     print("Start Training NodeExtractor")   # ------------------------------------------- NodeExtractor
     train_NodeExtractor(
         title=dataset,
         **default_params,
-        load_weights=None
+        heatmap_model_path=heatmap_model_path,
+        load_weights="Runs/NodeExtractor/241126_2349_initial/last.pth"
     )
 
     print("Start Training RGVAE")   # ------------------------------------------- RGVAE
     rgvae_path = train_rgvae(
         title=dataset,
         **vae_params,
-        load_weights=None
+        load_weights="Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth"
     )
 
     print("Start Training TRDiT")   # ------------------------------------------- TRDiT
@@ -74,14 +79,14 @@ if __name__ == "__main__":
         title=dataset,
         **diffusion_params,
         vae_path=rgvae_path,
-        load_weights=None
+        load_weights="Runs/RoutesDiT/241129_2126_295M/last.pth"
     )
 
     print("Start Training GraphusionVAE")   # ------------------------------------------- GraphusionVAE
     graphusion_vae_path = train_GraphusionVAE(
         title=dataset,
         **vae_params,
-        load_weights=None
+        load_weights="Runs/GraphusionVAE/241206_1058_initial/last.pth"
     )
 
     print("Start Training Graphusion")  # ------------------------------------------- Graphusion
@@ -89,5 +94,5 @@ if __name__ == "__main__":
         title=dataset,
         **diffusion_params,
         vae_path=graphusion_vae_path,
-        load_weights=None
+        load_weights="Runs/Graphusion/241207_1916_initial/last.pth"
     )

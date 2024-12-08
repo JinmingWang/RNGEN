@@ -7,7 +7,7 @@ import cv2
 import torch
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import CrossDomainVAE, RoutesDiT
+from Models import RGVAE, TRDiT
 
 
 def segsToHeatmaps(batch_segs: Tensor, batch_trajs: Tensor, traj_lens: Tensor, img_H: int, img_W: int, line_width: int):
@@ -57,7 +57,7 @@ def test(
         T=500,
         beta_min = 0.0001,
         beta_max = 0.05,
-        data_path = "Dataset/Tokyo_10k_sparse",
+        data_path = "Dataset/Tokyo",
         vae_path = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
         model_path = "Runs/RoutesDiT/241129_2126_295M/last.pth"
 ):
@@ -73,18 +73,18 @@ def test(
                                  need_heatmap=True
                                  )
 
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
-                         N_interp=dataset.N_interp, threshold=0.7).to(DEVICE)
+    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+                N_interp=dataset.N_interp, threshold=0.7).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
-    DiT = RoutesDiT(D_in=dataset.N_interp * 2,
-                    N_routes=dataset.N_trajs,
-                    L_route=dataset.max_L_route,
-                    L_traj=dataset.max_L_traj,
-                    d_context=2,
-                    n_layers=8,
-                    T=T).to(DEVICE)
+    DiT = TRDiT(D_in=dataset.N_interp * 2,
+                N_routes=dataset.N_trajs,
+                L_route=dataset.max_L_route,
+                L_traj=dataset.max_L_traj,
+                d_context=2,
+                n_layers=8,
+                T=T).to(DEVICE)
     #loadModels("Runs/RoutesDiT/241129_0108_300M/last.pth", TRDiT=TRDiT)
     loadModels(model_path, DiT=DiT)
 

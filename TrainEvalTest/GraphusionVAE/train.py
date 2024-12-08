@@ -29,7 +29,7 @@ def nodesAdjMatToSegs(f_nodes, adj_mat, f_edges, threshold=0.5):
 
 def train(
         title: str = "initial",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         kl_weight: float = 1e-6,
         lr: float = 1e-4,
         lr_reduce_factor: float = 0.5,

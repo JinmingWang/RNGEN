@@ -74,7 +74,7 @@ def test(
         T=500,
         beta_min = 0.0001,
         beta_max = 0.05,
-        dataset_path = "Dataset/Tokyo_10k_sparse",
+        dataset_path = "Dataset/Tokyo",
         vae_path = "Runs/GraphusionVAE/241206_1058_initial/last.pth",
         model_path = "Runs/Graphusion/241207_1916_initial/last.pth"
 ):

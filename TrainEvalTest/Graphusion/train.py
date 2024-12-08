@@ -15,7 +15,7 @@ from Diffusion import DDIM
 
 def train(
         title: str = "initial",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         lr: float = 2e-4,
         lr_reduce_factor: float = 0.5,
         lr_reduce_patience: int = 30,

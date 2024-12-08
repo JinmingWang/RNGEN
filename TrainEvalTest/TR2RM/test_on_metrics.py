@@ -10,7 +10,7 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import AD_Linked_Net, NodeExtractor
 
 def test(
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         model_path: str = "Runs/TR2RM/241124_1849_sparse/last.pth",
         node_extractor_path: str = "Runs/NodeExtractor/241126_2349_initial/last.pth",
 ):

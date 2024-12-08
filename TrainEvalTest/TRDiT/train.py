@@ -10,12 +10,12 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import RoutesDiT, CrossDomainVAE
+from Models import TRDiT, RGVAE
 from Diffusion import DDIM
 
 def train(
         title: str = "295M",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         lr: float = 2e-4,
         lr_reduce_factor: float = 0.5,
         lr_reduce_patience: int = 30,
@@ -44,24 +44,24 @@ def train(
                                  )
 
     # Models
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
-                         N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+                N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
-    DiT = RoutesDiT(D_in=dataset.N_interp * 2,
-                    N_routes=dataset.N_trajs,
-                    L_route=dataset.max_L_route,
-                    L_traj=dataset.max_L_traj,
-                    d_context=2,
-                    n_layers=8,
-                    T=T)
+    DiT = TRDiT(D_in=dataset.N_interp * 2,
+                N_routes=dataset.N_trajs,
+                L_route=dataset.max_L_route,
+                L_traj=dataset.max_L_traj,
+                d_context=2,
+                n_layers=8,
+                T=T)
 
     if load_weights is not None:
         loadModels(load_weights, DiT=DiT)
 
-    torch.set_float32_matmul_precision("high")
-    torch.compile(DiT)
+    # torch.set_float32_matmul_precision("high")
+    # torch.compile(DiT)
 
     DiT = DiT.to(DEVICE)
 

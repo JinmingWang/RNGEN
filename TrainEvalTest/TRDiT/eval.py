@@ -1,6 +1,6 @@
 from Dataset import RoadNetworkDataset
 from TrainEvalTest.Utils import *
-from Models import CrossDomainVAE
+from Models import RGVAE
 from Diffusion import DDIM
 
 from typing import Callable
@@ -13,7 +13,7 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def getEvalFunction(dataset_path: str, vae: CrossDomainVAE) -> Callable:
+def getEvalFunction(dataset_path: str, vae: RGVAE) -> Callable:
     """
     Evaluate the model on the given batch
     :param vae: The VAE model

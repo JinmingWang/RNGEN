@@ -8,7 +8,7 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import DFDRUNet, NodeExtractor
 
 def test(
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         model_path: str = "Runs/DFDRUNet/241201_1533_initial/last.pth",
         node_extractor_path: str = "Runs/NodeExtractor/241126_2349_initial/last.pth"
 ):

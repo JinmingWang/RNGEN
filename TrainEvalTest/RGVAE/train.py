@@ -9,12 +9,12 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import CrossDomainVAE, ClusterLoss, KLLoss
+from Models import RGVAE, ClusterLoss, KLLoss
 
 
 def train(
         title: str = "sparse_kl1e-6",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        dataset_path: str = "Dataset/Tokyo",
         kl_weight: float = 1e-6,
         lr: float = 1e-4,
         lr_reduce_factor: float = 0.5,
@@ -39,7 +39,7 @@ def train(
                                  img_W=16
                                  )
 
-    vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
 
     if load_weights is not None:
         loadModels(load_weights, vae=vae)
@@ -94,9 +94,9 @@ def train(
 
                 total_loss += loss
                 global_step += 1
-                mov_avg_cll.update(cll)
-                mov_avg_kll.update(kll)
-                mov_avg_rec.update(rec)
+                mov_avg_cll.update(cll.item())
+                mov_avg_kll.update(kll.item())
+                mov_avg_rec.update(rec.item())
 
                 # Progress update
                 progress.update(e, i,

@@ -34,8 +34,8 @@ class FeatureNorm(nn.Module):
 
 
 class AttentionBlock(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int,
-                 dropout: float=0.0, mask: bool=False):
+    def __init__(self, d_in: int, d_head: int, d_expand: int, d_out: int, n_heads: int,
+                 dropout: float=0.0, score: Literal["prod", "dist"] = "dist", d_time: int = 0):
         super(AttentionBlock, self).__init__()
 
         # in shape: (B, N, in_c)
@@ -45,67 +45,73 @@ class AttentionBlock(nn.Module):
         self.H = n_heads
         self.d_head = d_head
         self.d_in = d_in
-        self.l_in = l_in
-        # self.scale = nn.Parameter(torch.tensor(d_head, dtype=torch.float32))
-        self.scale = nn.Parameter(torch.tensor(1.414))
+        self.d_expand = d_expand
+        self.score = score
+        self.d_time = d_time
+        self.scale = nn.Parameter(torch.tensor(d_head if score == "prod" else 1.414, dtype=torch.float32))
         self.dropout = nn.Dropout(dropout)
-        self.mask = mask
 
         self.d_q = d_head * n_heads
         self.d_k = d_head * n_heads
         self.d_v = d_in * n_heads
         d_qkv = self.d_q + self.d_k + self.d_v
 
-        self.norm = FeatureNorm(d_in)
-
-        self.pos_enc = nn.Parameter(torch.randn(1, l_in, d_in))
-
         self.qkv_proj = nn.Sequential(
+            PositionalEncoding(d_in),
+            FeatureNorm(d_in),
             Swish(),
             nn.Linear(d_in, d_qkv),
         )
 
         self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
-
         torch.nn.init.zeros_(self.merge_head_proj.weight)
         torch.nn.init.zeros_(self.merge_head_proj.bias)
 
-        self.ff = nn.Sequential(
-            FeatureNorm(d_in),
-            nn.Linear(d_in, d_expand),
-            FeatureNorm(d_expand),
-            Swish(),
-            nn.Dropout(dropout),
-            nn.Linear(d_expand, d_out),
-        )
-
-        torch.nn.init.zeros_(self.ff[-1].weight)
-        torch.nn.init.zeros_(self.ff[-1].bias)
+        if d_time == 0:
+            self.ff = nn.Sequential(
+                nn.LayerNorm(d_in), Swish(),
+                nn.Linear(d_in, d_expand),
+                Swish(), nn.Dropout(dropout),
+                nn.Linear(d_expand, d_out),
+            )
+            torch.nn.init.zeros_(self.ff[-1].weight)
+            torch.nn.init.zeros_(self.ff[-1].bias)
+        else:
+            self.time_proj = nn.Sequential(
+                nn.Linear(d_time, d_time),
+                Swish(),
+                nn.Linear(d_time, d_in + d_expand)
+            )
+            self.ff1 = nn.Sequential(nn.LayerNorm(d_in), Swish(), nn.Linear(d_in, d_expand))
+            self.ff2 = nn.Sequential(Swish(), nn.Dropout(dropout), nn.Linear(d_expand, d_out))
+            torch.nn.init.zeros_(self.ff2[-1].weight)
+            torch.nn.init.zeros_(self.ff2[-1].bias)
 
         self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
 
-    def forward(self, x):
+    def forward(self, x, t=None):
         B, N, in_c = x.shape
 
-        q, k, v = self.qkv_proj(self.norm(x) + self.pos_enc).split([self.d_q, self.d_k, self.d_v], dim=-1)
+        q, k, v = self.qkv_proj(x).split([self.d_q, self.d_k, self.d_v], dim=-1)
         q = rearrange(q, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, head_c)
         k = rearrange(k, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, head_c, N)
         v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)  # (B*H, N, in_c)
 
-        # attn shape: (B*H, N, N)
-        # score = q @ kt * (self.scale ** -0.5)
-        score = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
-        # if self.mask:
-        #     upper_mask = torch.triu(torch.ones(1, N, N, device=x.device, dtype=torch.bool), diagonal=1)
-        #     score = score.masked_fill(upper_mask, float('-inf'))
-        # score = torch.softmax(score, dim=-1)
-        score = self.dropout(score)
+        if self.score == "prod":
+            attn = torch.softmax(q @ k.transpose(-1, -2) * (self.scale ** -0.5), dim=-1)
+        else:
+            attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
+        attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
-        out = rearrange(torch.bmm(score, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
+        out = rearrange(torch.bmm(attn, v), '(B H) N C -> B N (H C)', H=self.H, C=in_c)
         x = x + self.merge_head_proj(out)
 
-        return self.ff(x) + self.shortcut(x)
+        if self.d_time == 0:
+            return self.ff(x) + self.shortcut(x)
+        else:
+            t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
+            return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
 
 
 class CrossAttnBlock(nn.Module):
@@ -130,11 +136,13 @@ class CrossAttnBlock(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         self.q_proj = nn.Sequential(
+            PositionalEncoding(d_in),
             nn.LayerNorm(d_in), Swish(),
             nn.Linear(d_in, d_head * n_heads),
         )
 
         self.kv_proj = nn.Sequential(
+            PositionalEncoding(d_context, 512),
             nn.LayerNorm(d_context), Swish(),
             nn.Linear(d_context, (d_head + d_in) * n_heads),
         )
@@ -156,8 +164,7 @@ class CrossAttnBlock(nn.Module):
             self.time_proj = nn.Sequential(
                 nn.Linear(d_time, d_time),
                 Swish(),
-                nn.Linear(d_time, d_in + d_expand),
-                nn.Unflatten(-1, (1, -1))
+                nn.Linear(d_time, d_in + d_expand)
             )
             self.ff1 = nn.Sequential(nn.LayerNorm(d_in), Swish(), nn.Linear(d_in, d_expand))
             self.ff2 = nn.Sequential(Swish(), nn.Dropout(dropout), nn.Linear(d_expand, d_out))
@@ -191,83 +198,6 @@ class CrossAttnBlock(nn.Module):
         else:
             t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
             return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
-
-
-class AttentionWithTime(nn.Module):
-    def __init__(self, l_in: int, d_in: int, d_head: int, d_expand: int, d_out: int, d_time: int, n_heads: int, dropout: float=0.0):
-        super(AttentionWithTime, self).__init__()
-
-        # in shape: (B, N, in_c)
-        # Q shape: (B*H, N, head_c)
-        # K shape: (B*H, N, head_c)
-        # V shape: (B*H, N, in_c)
-        self.l_in = l_in
-        self.H = n_heads
-        self.d_head = d_head
-        self.d_in = d_in
-        self.d_expand = d_expand
-        #self.scale = nn.Parameter(torch.tensor(d_head, dtype=torch.float32))
-        self.scale = nn.Parameter(torch.tensor(1.414))
-        self.d_time = d_time
-        self.dropout = nn.Dropout(dropout)
-
-        self.d_q = d_head * n_heads
-        self.d_k = d_head *n_heads
-        self.d_v = d_in * n_heads
-        d_qkv = self.d_q + self.d_k + self.d_v
-
-        # self.norm = nn.LayerNorm(d_in)
-        self.norm = FeatureNorm(d_in)
-
-        self.pos_enc = nn.Parameter(torch.randn(1, l_in, d_in))
-
-        self.qkv_proj = nn.Sequential(
-            Swish(),
-            nn.Linear(d_in, d_qkv),
-        )
-
-        self.merge_head_proj = nn.Linear(d_in * self.H, d_in)
-        torch.nn.init.zeros_(self.merge_head_proj.weight)
-        torch.nn.init.zeros_(self.merge_head_proj.bias)
-
-        self.time_proj = nn.Linear(d_time, d_in + d_expand)
-
-        self.ff1 = nn.Sequential(
-            FeatureNorm(d_in),
-            Swish(),
-            nn.Linear(d_in, d_expand),
-        )
-
-        self.ff2 = nn.Sequential(
-            Swish(),
-            nn.Dropout(dropout),
-            nn.Linear(d_expand, d_out),
-        )
-
-        torch.nn.init.zeros_(self.ff2[-1].weight)
-        torch.nn.init.zeros_(self.ff2[-1].bias)
-
-        self.shortcut = nn.Linear(d_in, d_out) if d_in != d_out else nn.Identity()
-
-    def forward(self, x, t):
-        B, N, in_c = x.shape
-
-        q, k, v = self.qkv_proj(self.norm(x) + self.pos_enc).split([self.d_q, self.d_k, self.d_v], dim=-1)
-        q = rearrange(q, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, head_c)
-        k = rearrange(k, 'B N (H C) -> (B H) N C', H=self.H)   # (B*H, head_c, N)
-        v = rearrange(v, 'B N (H C) -> (B H) N C', H=self.H)    # (B*H, N, in_c)
-
-        # attn shape: (B*H, N, N)
-        # attn = torch.softmax(q @ kt * (self.scale  ** -0.5), dim=-1)
-        attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
-        attn = self.dropout(attn)
-
-        # out shape: (B, N, H*in_c)
-        out = rearrange(attn @ v, '(B H) N C -> B N (H C)', H=self.H, C=in_c)
-        x = x + self.merge_head_proj(out)
-
-        t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
-        return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
 
 
 class Transpose(nn.Module):
@@ -414,7 +344,7 @@ def cacheArgumentsUponInit(original_init):
 
 
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model: int, max_len: int = 5000):
+    def __init__(self, d_model: int, d_enc: int = 32, max_len: int = 1024):
         """
         Implements positional encoding for sequence data.
         :param d_model: Dimensionality of the model/embedding.
@@ -422,18 +352,17 @@ class PositionalEncoding(nn.Module):
         """
         super(PositionalEncoding, self).__init__()
         # Create a matrix of shape (max_len, d_model)
-        pe = torch.zeros(max_len, d_model)
+        pe = torch.zeros(max_len, d_enc)
         position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)  # Shape: (max_len, 1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))  # Shape: (d_model // 2)
+        div_term = torch.exp(torch.arange(0, d_enc, 2).float() * (-math.log(10000.0) / d_enc))  # Shape: (d_model // 2)
 
         # Compute positional encodings
         pe[:, 0::2] = torch.sin(position * div_term)  # Apply sin to even indices
         pe[:, 1::2] = torch.cos(position * div_term)  # Apply cos to odd indices
 
         # Register as a buffer to avoid updates during training
-        self.register_buffer('pe', pe.unsqueeze(0))  # Shape: (1, max_len, d_model)
-
-        self.proj = nn.Linear(d_model, d_model)
+        self.pe = nn.Parameter(pe.unsqueeze(0))
+        self.proj = nn.Linear(d_model + d_enc, d_model)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -441,5 +370,5 @@ class PositionalEncoding(nn.Module):
         :param x: Input tensor of shape (batch_size, seq_len, d_model).
         :return: Tensor with positional encodings added, same shape as input.
         """
-        seq_len = x.size(1)
-        return self.proj(x + self.pe[:, :seq_len])
+        B, L, D = x.shape
+        return self.proj(torch.cat([x, self.pe[:, :L].expand(B, -1, -1)], dim=-1))

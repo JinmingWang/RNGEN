@@ -13,8 +13,7 @@ from Models import UNet2D, AD_Linked_Net, NodeExtractor
 
 def train(
         title: str = "initial",
-        dataset_path: str = "Dataset/Tokyo_10k_sparse",
-        kl_weight: float = 1e-6,
+        dataset_path: str = "Dataset/Tokyo",
         lr: float = 1e-4,
         lr_reduce_factor: float = 0.5,
         lr_reduce_patience: int = 30,
@@ -36,7 +35,9 @@ def train(
                                  permute_seq=False,
                                  enable_aug=False,
                                  img_H=256,
-                                 img_W=256
+                                 img_W=256,
+                                 need_image=True,
+                                 need_heatmap=True
                                  )
 
     heatmap_model = AD_Linked_Net(d_in=4, H=256, W=256).to(DEVICE)
@@ -87,7 +88,7 @@ def train(
 
                 total_loss += loss
                 global_step += 1
-                mov_avg_loss.update(loss)
+                mov_avg_loss.update(loss.item())
 
                 # Progress update
                 progress.update(e, i,
