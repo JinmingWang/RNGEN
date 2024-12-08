@@ -1,14 +1,11 @@
 from Dataset import RoadNetworkDataset
-from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.DiT.configs import *
 from TrainEvalTest.Utils import *
-from Models import RoutesDiT, CrossDomainVAE
+from Models import CrossDomainVAE
 from Diffusion import DDIM
 
 from typing import Callable
 
 import torch
-import os
 
 
 def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, trajs: Tensor):
@@ -16,13 +13,13 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def getEvalFunction(vae: CrossDomainVAE) -> Callable:
+def getEvalFunction(dataset_path: str, vae: CrossDomainVAE) -> Callable:
     """
     Evaluate the model on the given batch
     :param vae: The VAE model
     :return: The figure and loss
     """
-    test_set = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+    test_set = RoadNetworkDataset(dataset_path,
                                  batch_size=10,
                                  drop_last=True,
                                  set_name="test",
@@ -31,7 +28,7 @@ def getEvalFunction(vae: CrossDomainVAE) -> Callable:
                                  img_W=16
                                  )
 
-    batch = test_set[0:B]
+    batch = test_set[0:10]
 
     with torch.no_grad():
         latent, _ = vae.encode(batch["routes"])

@@ -4,13 +4,15 @@ from tqdm import tqdm
 
 import torch
 
-import os
-
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import DFDRUNet, NodeExtractor
 
-def test():
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+def test(
+        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        model_path: str = "Runs/DFDRUNet/241201_1533_initial/last.pth",
+        node_extractor_path: str = "Runs/NodeExtractor/241126_2349_initial/last.pth"
+):
+    dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=100,
                                  drop_last=True,
                                  set_name="test",
@@ -26,8 +28,8 @@ def test():
 
     node_extractor = NodeExtractor().to(DEVICE)
 
-    loadModels("Runs/DFDRUNet/241201_1533_initial/last.pth", ADLinkedNet=model)
-    loadModels("Runs/NodeExtractor/241126_2349_initial/last.pth", node_model=node_extractor)
+    loadModels(model_path, DFDRUNet=model)
+    loadModels(node_extractor_path, node_model=node_extractor)
 
     model.eval()
     node_extractor.eval()

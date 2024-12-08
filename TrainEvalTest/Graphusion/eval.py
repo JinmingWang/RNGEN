@@ -1,6 +1,5 @@
 from Dataset import RoadNetworkDataset
 from TrainEvalTest.GraphusionVAE.train import nodesAdjMatToSegs
-from TrainEvalTest.Graphusion.configs import *
 from TrainEvalTest.Utils import *
 from Models import Graphusion, GraphusionVAE
 from Diffusion import DDIM
@@ -8,7 +7,6 @@ from Diffusion import DDIM
 from typing import Callable
 
 import torch
-import os
 
 
 def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, trajs: Tensor):
@@ -16,14 +14,14 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def getEvalFunction(vae: GraphusionVAE) -> Callable:
+def getEvalFunction(dataset_path: str, vae: GraphusionVAE) -> Callable:
     """
     Evaluate the model on the given batch
     :param vae: The VAE model
     :return: The figure and loss
     """
-    test_set = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
-                                 batch_size=B,
+    test_set = RoadNetworkDataset(dataset_path,
+                                 batch_size=10,
                                  drop_last=True,
                                  set_name="test",
                                  enable_aug=True,
@@ -32,7 +30,7 @@ def getEvalFunction(vae: GraphusionVAE) -> Callable:
                                  need_nodes=True
                                  )
 
-    batch = test_set[0:B]
+    batch = test_set[0:10]
 
     with torch.no_grad():
         latent, _ = vae.encode(batch["nodes"], batch["edges"], batch["adj_mat"])
@@ -56,7 +54,7 @@ def getEvalFunction(vae: GraphusionVAE) -> Callable:
                 loss_func(pred_adj_mat, batch["adj_mat"]) +
                 loss_func(pred_degrees, batch["degrees"]))
 
-        pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threahold=0.5)
+        pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threshold=0.5)
 
         plot_manager.plotNodesWithAdjMat(batch["nodes"][0], batch["adj_mat"][0], 0, 0, "Nodes")
         plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")

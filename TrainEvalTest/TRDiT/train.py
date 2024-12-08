@@ -1,7 +1,6 @@
-from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.DiT.configs import *
 from TrainEvalTest.Utils import *
-from TrainEvalTest.DiT.eval import getEvalFunction
+from TrainEvalTest.TRDiT.eval import getEvalFunction
+from datetime import datetime
 
 import torch
 from torch.optim import AdamW
@@ -14,9 +13,28 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import RoutesDiT, CrossDomainVAE
 from Diffusion import DDIM
 
-def train():
+def train(
+        title: str = "295M",
+        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        lr: float = 2e-4,
+        lr_reduce_factor: float = 0.5,
+        lr_reduce_patience: int = 30,
+        lr_reduce_min: float = 1e-7,
+        lr_reduce_threshold: float = 1e-5,
+        epochs: int = 1000,
+        B: int = 32,
+        T: int = 500,
+        mov_avg_len: int = 5,
+        log_interval: int = 10,
+        eval_interval: int = 10,
+        beta_min: float = 0.0001,
+        beta_max: float = 0.05,
+        vae_path: str = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
+        load_weights: str = None
+):
+    log_dir = f"./Runs/TRDiT/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+    dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -28,7 +46,7 @@ def train():
     # Models
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                          N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
-    loadModels("Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth", vae=vae)
+    loadModels(vae_path, vae=vae)
     vae.eval()
 
     DiT = RoutesDiT(D_in=dataset.N_interp * 2,
@@ -39,31 +57,34 @@ def train():
                     n_layers=8,
                     T=T)
 
+    if load_weights is not None:
+        loadModels(load_weights, DiT=DiT)
+
     torch.set_float32_matmul_precision("high")
     torch.compile(DiT)
 
     DiT = DiT.to(DEVICE)
 
-    eval = getEvalFunction(vae)
+    eval = getEvalFunction(dataset_path, vae)
 
-    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
+    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
     loss_func = torch.nn.MSELoss()
 
     # Optimizer & Scheduler
-    optimizer = AdamW(DiT.parameters(), lr=LR, amsgrad=True)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
-                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
+    optimizer = AdamW(DiT.parameters(), lr=lr, amsgrad=True)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=lr_reduce_factor, patience=lr_reduce_patience,
+                                     min_lr=lr_reduce_min, threshold=lr_reduce_threshold)
 
     # Prepare Logging
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR)
-    writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_loss = MovingAvg(MOV_AVG_LEN * len(dataset))
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    writer = SummaryWriter(log_dir=log_dir)
+    mov_avg_loss = MovingAvg(mov_avg_len * len(dataset))
     global_step = 0
     best_loss = float("inf")
 
-    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["Loss", "lr"]) as progress:
-        for e in range(EPOCHS):
+    with ProgressManager(len(dataset), epochs, 5, 2, ["Loss", "lr"]) as progress:
+        for e in range(epochs):
             total_loss = 0
             for i, batch in enumerate(dataset):
                 batch: Dict[str, Tensor]
@@ -90,22 +111,27 @@ def train():
 
                 progress.update(e, i, Loss=mov_avg_loss.get(), lr=optimizer.param_groups[0]['lr'])
 
-                if global_step % LOG_INTERVAL == 0:
+                if global_step % log_interval == 0:
                     writer.add_scalar("loss/Loss", mov_avg_loss.get(), global_step)
                     writer.add_scalar("lr", optimizer.param_groups[0]["lr"], global_step)
 
-            if e % EVAL_INTERVAL == 0:
+            if e % eval_interval == 0:
                 figure, eval_loss = eval(DiT, ddim)
                 writer.add_figure("Evaluation", figure, global_step)
                 writer.add_scalar("loss/eval", eval_loss, global_step)
 
-            saveModels(LOG_DIR + "last.pth", DiT=DiT)
+            saveModels(log_dir + "last.pth", DiT=DiT)
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(LOG_DIR + "best.pth", DiT=DiT)
+                saveModels(log_dir + "best.pth", DiT=DiT)
 
             lr_scheduler.step(total_loss)
 
+            if optimizer.param_groups[0]["lr"] <= lr_reduce_min:
+                # Stop training if learning rate is too low
+                break
+
+    return os.path.join(log_dir, "last.pth")
 
 if __name__ == "__main__":
     train()

@@ -1,15 +1,10 @@
-from TrainEvalTest.Graphusion.configs import *
-from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.Utils import *
 from TrainEvalTest.Metrics import *
 from Diffusion import DDIM
 from tqdm import tqdm
 import cv2
-import matplotlib.pyplot as plt
 
 import torch
-
-import os
 
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import Graphusion, GraphusionVAE
@@ -75,8 +70,15 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def test():
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+def test(
+        T=500,
+        beta_min = 0.0001,
+        beta_max = 0.05,
+        dataset_path = "Dataset/Tokyo_10k_sparse",
+        vae_path = "Runs/GraphusionVAE/241206_1058_initial/last.pth",
+        model_path = "Runs/Graphusion/241207_1916_initial/last.pth"
+):
+    dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=100,
                                  drop_last=True,
                                  set_name="test",
@@ -91,7 +93,7 @@ def test():
 
     # Models
     vae = GraphusionVAE(d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_layers=8, n_heads=8).to(DEVICE)
-    loadModels("Runs/GraphusionVAE/241206_1058_initial/last.pth", vae=vae)
+    loadModels(vae_path, vae=vae)
     vae.eval()
 
     graphusion = Graphusion(D_in=128,
@@ -101,10 +103,10 @@ def test():
                             d_context=2,
                             n_layers=6,
                             T=T).to(DEVICE)
-    loadModels("Runs/Graphusion/241207_1916_initial/last.pth", graphusion=graphusion)
+    loadModels(model_path, graphusion=graphusion)
     graphusion.eval()
 
-    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=2)
+    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=2)
 
     titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
                 "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]

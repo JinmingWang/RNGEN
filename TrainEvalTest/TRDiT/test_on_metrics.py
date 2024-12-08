@@ -1,15 +1,10 @@
-from TrainEvalTest.DiT.configs import *
-from TrainEvalTest.GlobalConfigs import *
 from TrainEvalTest.Utils import *
 from TrainEvalTest.Metrics import *
 from Diffusion import DDIM
 from tqdm import tqdm
 import cv2
-import matplotlib.pyplot as plt
 
 import torch
-
-import os
 
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import CrossDomainVAE, RoutesDiT
@@ -58,8 +53,15 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def test():
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+def test(
+        T=500,
+        beta_min = 0.0001,
+        beta_max = 0.05,
+        data_path = "Dataset/Tokyo_10k_sparse",
+        vae_path = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
+        model_path = "Runs/RoutesDiT/241129_2126_295M/last.pth"
+):
+    dataset = RoadNetworkDataset(folder_path=data_path,
                                  batch_size=100,
                                  drop_last=True,
                                  set_name="test",
@@ -73,7 +75,7 @@ def test():
 
     vae = CrossDomainVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                          N_interp=dataset.N_interp, threshold=0.7).to(DEVICE)
-    loadModels("Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth", vae=vae)
+    loadModels(vae_path, vae=vae)
     vae.eval()
 
     DiT = RoutesDiT(D_in=dataset.N_interp * 2,
@@ -83,14 +85,14 @@ def test():
                     d_context=2,
                     n_layers=8,
                     T=T).to(DEVICE)
-    #loadModels("Runs/RoutesDiT/241129_0108_300M/last.pth", DiT=DiT)
-    loadModels("Runs/RoutesDiT/241129_2126_295M/last.pth", DiT=DiT)
+    #loadModels("Runs/RoutesDiT/241129_0108_300M/last.pth", TRDiT=TRDiT)
+    loadModels(model_path, DiT=DiT)
 
     # state_dict = torch.load("Runs/PathsDiT/241128_0811_KL1e-6/last.pth")
-    # DiT.load_state_dict(state_dict)
-    # DiT.eval()
+    # TRDiT.load_state_dict(state_dict)
+    # TRDiT.eval()
 
-    ddim = DDIM(BETA_MIN, BETA_MAX, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
+    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
 
     titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
                 "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]

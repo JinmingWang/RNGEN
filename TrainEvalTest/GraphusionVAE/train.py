@@ -1,8 +1,5 @@
-from TrainEvalTest.GlobalConfigs import *
-from TrainEvalTest.GraphusionVAE.configs import *
 from TrainEvalTest.Utils import *
-
-from einops import rearrange
+from datetime import datetime
 
 import torch
 from torch.optim import AdamW
@@ -30,9 +27,24 @@ def nodesAdjMatToSegs(f_nodes, adj_mat, f_edges, threshold=0.5):
     return batch_segs
 
 
-def train():
+def train(
+        title: str = "initial",
+        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        kl_weight: float = 1e-6,
+        lr: float = 1e-4,
+        lr_reduce_factor: float = 0.5,
+        lr_reduce_patience: int = 30,
+        lr_reduce_min: float = 1e-7,
+        lr_reduce_threshold: float = 1e-5,
+        epochs: int = 1000,
+        B: int = 32,
+        mov_avg_len: int = 6,
+        log_interval: int = 10,
+        load_weights: str = "Runs/GraphusionVAE/241205_2212_initial/last.pth"
+):
+    log_dir = f"./Runs/GraphusionVAE/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
     # Dataset & DataLoader
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+    dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
@@ -44,32 +56,33 @@ def train():
 
     vae = GraphusionVAE(d_node=2, d_edge=16, d_latent=128, d_hidden=256, n_layers=8, n_heads=8).to(DEVICE)
 
-    loadModels("Runs/GraphusionVAE/241205_2212_initial/last.pth", vae=vae)
+    if load_weights is not None:
+        loadModels(load_weights, vae=vae)
 
     rec_loss_func = torch.nn.MSELoss()
     mat_loss_func = torch.nn.BCELoss()
-    kl_loss_func = KLLoss(kl_weight=KL_WEIGHT)
+    kl_loss_func = KLLoss(kl_weight=kl_weight)
 
     # Optimizer & Scheduler
-    optimizer = AdamW(vae.parameters(), lr=LR, amsgrad=True)
-    lr_scheduler = ReduceLROnPlateau(optimizer, factor=LR_REDUCE_FACTOR, patience=LR_REDUCE_PATIENCE,
-                                     min_lr=LR_REDUCE_MIN, threshold=LR_REDUCE_THRESHOLD)
+    optimizer = AdamW(vae.parameters(), lr=lr, amsgrad=True)
+    lr_scheduler = ReduceLROnPlateau(optimizer, factor=lr_reduce_factor, patience=lr_reduce_patience,
+                                     min_lr=lr_reduce_min, threshold=lr_reduce_threshold)
 
     # Prepare Logging
-    if not os.path.exists(LOG_DIR):
-        os.makedirs(LOG_DIR, exist_ok=True)
-    writer = SummaryWriter(log_dir=LOG_DIR)
-    mov_avg_kll = MovingAvg(MOV_AVG_LEN * len(dataset))
-    mov_avg_node = MovingAvg(MOV_AVG_LEN * len(dataset))
-    mov_avg_edge = MovingAvg(MOV_AVG_LEN * len(dataset))
-    mov_avg_adj = MovingAvg(MOV_AVG_LEN * len(dataset))
-    mov_avg_deg = MovingAvg(MOV_AVG_LEN * len(dataset))
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir=log_dir)
+    mov_avg_kll = MovingAvg(mov_avg_len * len(dataset))
+    mov_avg_node = MovingAvg(mov_avg_len * len(dataset))
+    mov_avg_edge = MovingAvg(mov_avg_len * len(dataset))
+    mov_avg_adj = MovingAvg(mov_avg_len * len(dataset))
+    mov_avg_deg = MovingAvg(mov_avg_len * len(dataset))
     global_step = 0
     best_loss = float("inf")
     plot_manager = PlotManager(4, 1, 4)
 
-    with ProgressManager(len(dataset), EPOCHS, 5, 2, ["KLL", "NODE", "EDGE", "ADJ", "DEG", "lr"]) as progress:
-        for e in range(EPOCHS):
+    with ProgressManager(len(dataset), epochs, 5, 2, ["KLL", "NODE", "EDGE", "ADJ", "DEG", "lr"]) as progress:
+        for e in range(epochs):
             total_loss = 0
             for i, batch in enumerate(dataset):
                 batch: Dict[str, torch.Tensor]
@@ -118,7 +131,7 @@ def train():
                                 lr=optimizer.param_groups[0]['lr'])
 
                 # Logging
-                if global_step % LOG_INTERVAL == 0:
+                if global_step % log_interval == 0:
                     writer.add_scalar("KLL", mov_avg_kll.get(), global_step)
                     writer.add_scalar("NODE", mov_avg_node.get(), global_step)
                     writer.add_scalar("EDGE", mov_avg_edge.get(), global_step)
@@ -127,8 +140,8 @@ def train():
                     writer.add_scalar("Learning Rate", optimizer.param_groups[0]["lr"], global_step)
 
 
-            pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threahold=0.5)
-            target_segs = nodesAdjMatToSegs(batch["nodes"][0:1], batch["adj_mat"][0:1], batch["edges"][0:1], threahold=0.5)
+            pred_segs = nodesAdjMatToSegs(f_nodes[0:1], pred_adj_mat[0:1], f_edges[0:1], threshold=0.5)
+            target_segs = nodesAdjMatToSegs(batch["nodes"][0:1], batch["adj_mat"][0:1], batch["edges"][0:1], threshold=0.5)
 
             # Plot reconstructed segments and graphs
             plot_manager.plotNodesWithAdjMat(batch["nodes"][0], batch["adj_mat"][0], 0, 0, "Nodes")
@@ -139,14 +152,19 @@ def train():
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 
             # Save models
-            saveModels(os.path.join(LOG_DIR, "last.pth"), vae=vae)
+            saveModels(os.path.join(log_dir, "last.pth"), vae=vae)
             if total_loss < best_loss:
                 best_loss = total_loss
-                saveModels(os.path.join(LOG_DIR, "best.pth"), vae=vae)
+                saveModels(os.path.join(log_dir, "best.pth"), vae=vae)
 
             # Step scheduler
             lr_scheduler.step(total_loss)
 
+            if optimizer.param_groups[0]["lr"] <= lr_reduce_min:
+                # Stop training if learning rate is too low
+                break
+
+    return os.path.join(log_dir, "last.pth")
 
 if __name__ == "__main__":
     train()

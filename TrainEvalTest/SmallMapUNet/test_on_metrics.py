@@ -9,8 +9,12 @@ import os
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import UNet2D, NodeExtractor
 
-def test():
-    dataset = RoadNetworkDataset("Dataset/Tokyo_10k_sparse",
+def test(
+        dataset_path: str = "Dataset/Tokyo_10k_sparse",
+        model_path: str = "Runs/SmallMapUNet/241124_1849_sparse/last.pth",
+        node_extractor_path: str = "Runs/NodeExtractor/241126_2349_initial/last.pth"
+):
+    dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=100,
                                  drop_last=True,
                                  set_name="test",
@@ -26,8 +30,8 @@ def test():
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
     node_extractor = NodeExtractor().to(DEVICE)
 
-    loadModels("Runs/SmallMapUNet/241124_1849_sparse/last.pth", stage_1=stage_1, stage_2=stage_2)
-    loadModels("Runs/NodeExtractor/241126_2349_initial/last.pth", node_model=node_extractor)
+    loadModels(model_path, stage_1=stage_1, stage_2=stage_2)
+    loadModels(node_extractor_path, node_model=node_extractor)
 
     stage_1.eval()
     stage_2.eval()

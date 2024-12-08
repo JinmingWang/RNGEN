@@ -1,5 +1,5 @@
-from TrainEvalTest.CrossDomainVAE.train import train as train_cdvae
-from TrainEvalTest.DiT.train import train as train_DiT
+from TrainEvalTest.RGVAE.train import train as train_cdvae
+from TrainEvalTest.TRDiT.train import train as train_DiT
 from TrainEvalTest.SmallMapUNet.train import train as train_SmallMap
 from TrainEvalTest.TR2RM.train import train as train_TR2RM
 from TrainEvalTest.DFDRUNet.train import train as train_DFDRUNet
