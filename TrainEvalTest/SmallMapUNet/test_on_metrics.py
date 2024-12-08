@@ -17,7 +17,9 @@ def test():
                                  permute_seq=False,
                                  enable_aug=False,
                                  img_H=256,
-                                 img_W=256
+                                 img_W=256,
+                                 need_heatmap=True,
+                                 need_image=True,
                                  )
 
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
@@ -45,16 +47,10 @@ def test():
                 pred_2 = stage_2(pred_1)
                 pred_nodemap = node_extractor(pred_2)
 
-            batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
-            max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            point_range = max_point - min_point
-            norm_segs = []
-            for b, segs in enumerate(batch_segs):
-                norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
 
             pred_segs = heatmapsToSegments(pred_2, pred_nodemap)
-            batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], pred_segs, norm_segs)
+            batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], pred_segs,
+                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             batch_scores = np.array(batch_scores).T
 

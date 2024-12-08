@@ -101,13 +101,13 @@ def test():
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
 
-            batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
-            max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            point_range = max_point - min_point
-            norm_segs = []
-            for b, segs in enumerate(batch_segs):
-                norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
+            # batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
+            # max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # point_range = max_point - min_point
+            # norm_segs = []
+            # for b, segs in enumerate(batch_segs):
+            #     norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
 
 
             with torch.no_grad():
@@ -121,17 +121,19 @@ def test():
             # plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
             # plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
 
-            norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
-            max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            point_range = max_point - min_point
+            # norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
+            # max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # point_range = max_point - min_point
 
             pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
-            for i in range(len(coi_means)):
-                coi_means[i] = ((coi_means[i] - min_point) / point_range)
+            # for i in range(len(coi_means)):
+            #     coi_means[i] = ((coi_means[i] - min_point) / point_range)
 
-            batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"], coi_means, norm_segs)
+            batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"],
+                                            coi_means,
+                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             # plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
             # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")

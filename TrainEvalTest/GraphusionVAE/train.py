@@ -14,14 +14,14 @@ import os
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import GraphusionVAE, KLLoss
 
-def nodesAdjMatToSegs(f_nodes, adj_mat, f_edges, threahold=0.5):
+def nodesAdjMatToSegs(f_nodes, adj_mat, f_edges, threshold=0.5):
     B = f_nodes.shape[0]
     batch_segs = []
     for b in range(B):
         segs = []
         for r in range(adj_mat.shape[1]):
             for c in range(r + 1, adj_mat.shape[2]):
-                if adj_mat[b, r, c] >= threahold:
+                if adj_mat[b, r, c] >= threshold:
                     segs.append(f_edges[b, r, c].view(8, 2))
         if len(segs) == 0:
             batch_segs.append(torch.zeros(1, 8, 2, dtype=torch.float32, device=DEVICE))

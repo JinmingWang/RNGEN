@@ -10,7 +10,7 @@ model_names = list(map(lambda name: name[:-4].split("_")[-1], file_names))
 reports = {model_name: pd.read_csv(file_name) for (model_name, file_name) in zip(model_names, file_names)}
 
 
-colors = ["red", "blue", "green", "yellow", "orange", "purple", "pink", "cyan"]
+colors = ["red", "blue", "green", "orange", "purple", "pink", "cyan"]
 
 
 titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",

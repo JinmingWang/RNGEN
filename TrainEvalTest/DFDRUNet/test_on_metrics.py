@@ -17,7 +17,9 @@ def test():
                                  permute_seq=False,
                                  enable_aug=False,
                                  img_H=256,
-                                 img_W=256
+                                 img_W=256,
+                                 need_heatmap=True,
+                                 need_image=True
                                  )
 
     model = DFDRUNet().to(DEVICE)
@@ -43,16 +45,9 @@ def test():
                 pred_heatmap = model(batch["image"], batch["heatmap"])
                 pred_nodemap = node_extractor(pred_heatmap)
 
-            batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
-            max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            point_range = max_point - min_point
-            norm_segs = []
-            for b, segs in enumerate(batch_segs):
-                norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
-
             pred_segs = heatmapsToSegments(pred_heatmap, pred_nodemap)
-            batch_scores = reportAllMetrics(pred_heatmap, batch["target_heatmaps"], pred_segs, norm_segs)
+            batch_scores = reportAllMetrics(pred_heatmap, batch["target_heatmaps"], pred_segs,
+                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             batch_scores = np.array(batch_scores).T
 

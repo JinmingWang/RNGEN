@@ -3,7 +3,7 @@ from Dataset import RoadNetworkDataset
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from scipy.optimize import linear_sum_assignment
 import torch
-import os
+import torch.nn.functional as func
 import numpy as np
 from jaxtyping import Float32 as F32
 from typing import Tuple, List
@@ -69,6 +69,14 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
     for b in range(B):
         pred_segs = batch_pred_segs[b].flatten(1)  # (P, N_interp*2)
         target_segs = batch_target_segs[b].flatten(1)  # (Q, N_interp*2)
+        P = len(pred_segs)
+        Q = len(target_segs)
+
+        if P > Q:
+            target_segs = func.pad(target_segs, (0, 0, 0, P - Q))
+        elif Q > P:
+            pred_segs = func.pad(pred_segs, (0, 0, 0, Q - P))
+
         cost_matrix = torch.cdist(pred_segs, target_segs, p=2).cpu().detach().numpy()  # (P, Q)
 
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
@@ -78,22 +86,22 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         matched_target_segs = target_segs[col_ind]
 
         # Unmatched segments, The match target will be 0 if the segment is unmatched
-        unmatched_rows = [i for i in range(pred_segs.shape[0]) if i not in row_ind]
-        unmatched_cols = [i for i in range(target_segs.shape[0]) if i not in col_ind]
-        unmatched_pred_segs = pred_segs[unmatched_rows]
-        unmatched_target_segs = target_segs[unmatched_cols]
+        # unmatched_rows = [i for i in range(pred_segs.shape[0]) if i not in row_ind]
+        # unmatched_cols = [i for i in range(target_segs.shape[0]) if i not in col_ind]
+        # unmatched_pred_segs = pred_segs[unmatched_rows]
+        # unmatched_target_segs = target_segs[unmatched_cols]
 
         mae = torch.abs(matched_pred_segs - matched_target_segs).mean().item()
 
         mse = ((matched_pred_segs - matched_target_segs) ** 2).mean().item()
 
-        if len(unmatched_pred_segs) > 0:
-            mae += unmatched_pred_segs.abs().mean().item()
-            mse += (unmatched_pred_segs ** 2).mean().item()
-
-        if len(unmatched_target_segs) > 0:
-            mae += unmatched_target_segs.abs().mean().item()
-            mse += (unmatched_target_segs ** 2).mean().item()
+        # if len(unmatched_pred_segs) > 0:
+        #     mae += unmatched_pred_segs.abs().mean().item()
+        #     mse += (unmatched_pred_segs ** 2).mean().item()
+        #
+        # if len(unmatched_target_segs) > 0:
+        #     mae += unmatched_target_segs.abs().mean().item()
+        #     mse += (unmatched_target_segs ** 2).mean().item()
 
         mae_list.append(mae)
         mse_list.append(mse)
@@ -122,19 +130,19 @@ def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         target_segs = batch_target_segs[b].flatten(1)  # (Q, N_interp*2)
 
         # Compute pairwise distance matrix
-        cost_matrix = torch.cdist(pred_segs, target_segs, p=2).cpu().detach().numpy()  # (P, Q)
+        cost_matrix = torch.cdist(pred_segs, target_segs, p=2)  # (P, Q)
 
         # Find the best match for each segment in the predicted segments
-        row_ind = torch.argmin(torch.tensor(cost_matrix, dtype=torch.float32), dim=1)
+        row_ind_p2t = torch.argmin(cost_matrix, dim=1)
 
         # Compute MAE and MSE (match the predicted segments to the target segments)
-        mae_p2t = (torch.abs(pred_segs - target_segs[row_ind]).mean())
-        mse_p2t = ((pred_segs - target_segs[row_ind]) ** 2).mean()
+        mae_p2t = (torch.abs(pred_segs - target_segs[row_ind_p2t]).mean())
+        mse_p2t = ((pred_segs - target_segs[row_ind_p2t]) ** 2).mean()
 
         # Compute MAE and MSE (match the target segments to the predicted segments)
-        row_ind = torch.argmin(torch.tensor(cost_matrix, dtype=torch.float32), dim=0)
-        mae_t2p = (torch.abs(pred_segs[row_ind] - target_segs).mean())
-        mse_t2p = ((pred_segs[row_ind] - target_segs) ** 2).mean()
+        row_ind_t2p = torch.argmin(cost_matrix, dim=0)
+        mae_t2p = (torch.abs(pred_segs[row_ind_t2p] - target_segs).mean())
+        mse_t2p = ((pred_segs[row_ind_t2p] - target_segs) ** 2).mean()
 
         # Why do we compute p2t and also t2p?
         # When we match p to t, some segments in p may not have a match in t, they are not counted in the loss.
@@ -283,11 +291,15 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
                 segs[-1][seg_i] = segs[-1][seg_i].flip(0)
 
         try:
-            # Normalize segments to 0-1
-            max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
-            min_point = torch.min(segs[-1].flatten(0, 1), dim=0).values
-            point_range = max_point - min_point
-            segs[-1] = ((segs[-1] - min_point) / point_range)
+            # z-score normalize segments to 0-1
+            mean_point = torch.mean(segs[-1].flatten(0, 1), dim=0)
+            std_point = torch.std(segs[-1].flatten(0, 1), dim=0)
+            segs[-1] = (segs[-1] - mean_point) / std_point
+
+            # max_point = torch.max(segs[-1].flatten(0, 1), dim=0).values
+            # min_point = torch.min(segs[-1].flatten(0, 1), dim=0).values
+            # point_range = max_point - min_point
+            # segs[-1] = ((segs[-1] - min_point) / point_range)
             if torch.any(torch.isnan(segs[-1])):
                 print("nan")
         except:
