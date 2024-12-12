@@ -89,10 +89,10 @@ class RGVAE(nn.Module):
             nn.Conv1d(2 * N_interp, 64, 3, 1, 1),
             Swish(),
 
-            *[Res1D(64, 128, 64) for _ in range(3)],
+            *[SERes1D(64, 128, 64) for _ in range(3)],
             Conv1dNormAct(64, 128, 1, 1, 0),
 
-            *[Res1D(128, 256, 128) for _ in range(3)],
+            *[SERes1D(128, 256, 128) for _ in range(3)],
             nn.Conv1d(128, 256, 1, 1, 0),
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
@@ -115,10 +115,10 @@ class RGVAE(nn.Module):
             Rearrange("B N_routes L_route D", "(B N_routes) D L_route"),
 
             nn.Conv1d(N_interp * 2, 64, 1, 1, 0),
-            *[Res1D(64, 128, 64) for _ in range(3)],
+            *[SERes1D(64, 128, 64) for _ in range(3)],
 
             nn.Conv1d(64, 128, 1, 1, 0),
-            *[Res1D(128, 256, 128) for _ in range(3)],
+            *[SERes1D(128, 256, 128) for _ in range(3)],
 
             nn.Conv1d(128, 384, 1, 1, 0),
 

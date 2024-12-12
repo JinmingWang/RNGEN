@@ -80,7 +80,7 @@ class AttentionBlock(nn.Module):
             self.time_proj = nn.Sequential(
                 nn.Linear(d_time, d_time),
                 Swish(),
-                nn.Linear(d_time, d_in + d_expand)
+                nn.Linear(d_time, d_expand)
             )
             self.ff1 = nn.Sequential(nn.LayerNorm(d_in), Swish(), nn.Linear(d_in, d_expand))
             self.ff2 = nn.Sequential(Swish(), nn.Dropout(dropout), nn.Linear(d_expand, d_out))
@@ -100,7 +100,8 @@ class AttentionBlock(nn.Module):
         if self.score == "prod":
             attn = torch.softmax(q @ k.transpose(-1, -2) * (self.scale ** -0.5), dim=-1)
         else:
-            attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
+            attn = torch.softmax(- torch.cdist(q, k) ** 2 / self.scale ** 2, dim=-1)
+            # attn = torch.softmax(torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2), dim=-1)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)
@@ -110,8 +111,7 @@ class AttentionBlock(nn.Module):
         if self.d_time == 0:
             return self.ff(x) + self.shortcut(x)
         else:
-            t_shift, t_scale = self.time_proj(t).split([self.d_in, self.d_expand], dim=-1)
-            return self.ff2(self.ff1(x + t_shift) * torch.sigmoid(t_scale)) + self.shortcut(x)
+            return self.ff2(self.ff1(x) + self.time_proj(t)) + self.shortcut(x)
 
 
 class CrossAttnBlock(nn.Module):
@@ -242,7 +242,7 @@ class SERes1D(nn.Module):
             nn.AdaptiveAvgPool1d(1),
             nn.Conv1d(d_in, d_in // 4, 1, 1, 0),
             Swish(),
-            nn.Conv1d(d_in // 4, d_in, 1, 1, 0),
+            nn.Conv1d(d_in // 4, d_mid, 1, 1, 0),
             nn.Sigmoid()
         )
 
@@ -255,7 +255,7 @@ class SERes1D(nn.Module):
         self.s2 = nn.Sequential(
             nn.GroupNorm(8, d_mid),
             Swish(),
-            nn.Conv1d(d_in, d_out, 1, 1, 0)
+            nn.Conv1d(d_mid, d_out, 1, 1, 0)
         )
 
         torch.nn.init.zeros_(self.s2[-1].weight)

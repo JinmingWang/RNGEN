@@ -6,7 +6,12 @@ from TrainEvalTest.SmallMapUNet.test_on_metrics import test as test_SmallMap
 
 
 weights = {
-    "Tokyo": {},
+    "Tokyo": {
+        "TR2RM": "Runs/TR2RM/241209_0940_Tokyo/last.pth",
+        "DFDRUNet": "Runs/DFDRUNet/241208_2042_Tokyo/last.pth",
+        "SmallMap": "Runs/SmallMap/241209_1422_Tokyo/last.pth",
+        "NodeExtractor": "Runs/NodeExtractor/241209_1814_Tokyo/last.pth"
+    },
     "Shanghai": {},
     "Paris": {},
     "LasVegas": {},
@@ -30,10 +35,10 @@ if __name__ == "__main__":
             node_extractor_path=weights[dataset_name]["NodeExtractor"]
         )
 
-        print(f"Start Testing SmallMapUNet on {dataset_name}")
+        print(f"Start Testing SmallMap on {dataset_name}")
         test_SmallMap(
             dataset_path=f"Dataset/{dataset_name}",
-            model_path=weights[dataset_name]["SmallMapUNet"],
+            model_path=weights[dataset_name]["SmallMap"],
             node_extractor_path=weights[dataset_name]["NodeExtractor"]
         )
 

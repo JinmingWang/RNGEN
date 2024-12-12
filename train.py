@@ -24,7 +24,6 @@ default_params = {
 
 ### For fine-tunning
 default_params["lr"] = 1e-4
-default_params["epochs"] = 1
 
 vae_params = {k: v for k, v in default_params.items()}
 vae_params["lr"] = 1e-4
@@ -38,34 +37,35 @@ diffusion_params["eval_interval"] = 10
 
 
 if __name__ == "__main__":
-    print("Start Training DFDRUNet")    # ------------------------------------------- DFDRUNet
-    train_DFDRUNet(
-        title=dataset,
-        **default_params,
-        load_weights="Runs/DFDRUNet/241201_1533_initial/last.pth"
-    )
-
-    print("Start Training TR2RM (AD-Linked Net)")   # ------------------------------------------- TR2RM
-    heatmap_model_path = train_TR2RM(
-        title=dataset,
-        **default_params,
-        load_weights="Runs/TR2RM/241124_1849_sparse/last.pth"
-    )
-
-    print("Start Training SmallMap (UNet)")  # ------------------------------------------- SmallMapUNet
-    train_SmallMap(
-        title=dataset,
-        **default_params,
-        load_weights="Runs/SmallMapUNet/241124_1849_sparse/last.pth"
-    )
-
-    print("Start Training NodeExtractor")   # ------------------------------------------- NodeExtractor
-    train_NodeExtractor(
-        title=dataset,
-        **default_params,
-        heatmap_model_path=heatmap_model_path,
-        load_weights="Runs/NodeExtractor/241126_2349_initial/last.pth"
-    )
+    # print("Start Training DFDRUNet")    # ------------------------------------------- DFDRUNet
+    # train_DFDRUNet(
+    #     title=dataset,
+    #     **default_params,
+    #     load_weights="Runs/DFDRUNet/241201_1533_initial/last.pth"
+    # )
+    #
+    # print("Start Training TR2RM (AD-Linked Net)")   # ------------------------------------------- TR2RM
+    # heatmap_model_path = train_TR2RM(
+    #     title=dataset,
+    #     **default_params,
+    #     load_weights="Runs/TR2RM/241124_1849_sparse/last.pth"
+    # )
+    #
+    # print("Start Training SmallMap (UNet)")  # ------------------------------------------- SmallMapUNet
+    # train_SmallMap(
+    #     title=dataset,
+    #     **default_params,
+    #     load_weights="Runs/SmallMapUNet/241124_1849_sparse/last.pth"
+    # )
+    #
+    # print("Start Training NodeExtractor")   # ------------------------------------------- NodeExtractor
+    # train_NodeExtractor(
+    #     title=dataset,
+    #     **default_params,
+    #     # heatmap_model_path=heatmap_model_path,
+    #     heatmap_model_path="Runs/TR2RM/241209_0940_Tokyo/last.pth",
+    #     load_weights="Runs/NodeExtractor/241126_2349_initial/last.pth"
+    # )
 
     print("Start Training RGVAE")   # ------------------------------------------- RGVAE
     rgvae_path = train_rgvae(

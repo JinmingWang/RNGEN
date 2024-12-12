@@ -92,7 +92,7 @@ class TRDiT(nn.Module):
             # traj -> feature sequence
             Rearrange("B N L D", "(B N) D L"),  # (BN, 2, L')
             nn.Conv1d(d_context, 128, 3, 2, 1), Swish(),
-            *[Res1D(128, 256, 128) for _ in range(4)],
+            *[SERes1D(128, 256, 128) for _ in range(4)],
             nn.Conv1d(128, 256, 3, 1, 1),
 
             # Attention among all traj tokens
