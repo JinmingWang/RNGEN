@@ -37,8 +37,7 @@ def test(
     stage_2.eval()
     node_extractor.eval()
 
-    titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
-                "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
+    titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
     name = "SmallMap"
 
@@ -53,7 +52,7 @@ def test(
 
 
             pred_segs = heatmapsToSegments(pred_2, pred_nodemap)
-            batch_scores = reportAllMetrics(pred_2, batch["target_heatmaps"], pred_segs,
+            batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             batch_scores = np.array(batch_scores).T

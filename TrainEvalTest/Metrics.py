@@ -2,6 +2,7 @@ from Dataset import RoadNetworkDataset
 # Accuracy, Precision, Recall, F1
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from scipy.optimize import linear_sum_assignment
+from scipy.stats import wasserstein_distance
 import torch
 import torch.nn.functional as func
 import numpy as np
@@ -157,6 +158,55 @@ def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
     return mae_list, mse_list
 
 
+def segCountMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
+                     batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> List[float]:
+    """
+    Compute the difference in the number of segments in the predicted and target segments
+    :param batch_pred_segs: the predicted segments
+    :param batch_target_segs: the target segments
+    :return: the difference in the number of segments in the predicted and target segments
+    """
+    B = len(batch_pred_segs)
+
+    pred_counts = [segs.shape[0] for segs in batch_pred_segs]
+    target_counts = [segs.shape[0] for segs in batch_target_segs]
+
+    diff_counts = [float(pred_counts[i] - target_counts[i]) for i in range(B)]
+
+    return diff_counts
+
+
+def segLengthMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
+                    batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> List[float]:
+    """
+    Compute the difference in the length distribution of the predicted and target segments
+    :param batch_pred_segs: the predicted segments
+    :param batch_target_segs: the target segments
+    :return: the difference in the length distribution of the predicted and target segments
+    """
+    B = len(batch_pred_segs)
+
+    # Each batch item is of shape (P, N_interp, 2) or (Q, N_interp, 2)
+    # It contains P or Q segments, each segment has N_interp points in 2D
+
+    distribution_diffs = []
+    for b in range(B):
+        pred_segs = batch_pred_segs[b]  # (P, N_interp, 2)
+        target_segs = batch_target_segs[b]  # (Q, N_interp, 2)
+
+        # Compute the length of each segment
+
+        # (P, N_interp, 2) -> (P, )
+        pred_lengths = torch.linalg.norm(pred_segs[:, 1:] - pred_segs[:, :-1], dim=-1).sum(dim=-1)
+        # (Q, N_interp, 2) -> (Q, )
+        target_lengths = torch.linalg.norm(target_segs[:, 1:] - target_segs[:, :-1], dim=-1).sum(dim=-1)
+
+        # Compute the difference in the length distribution using Wasserstein distance
+        distribution_diff = wasserstein_distance(pred_lengths.cpu().numpy(), target_lengths.cpu().numpy())
+        distribution_diffs.append(distribution_diff)
+
+    return distribution_diffs
+
 def renderPlot(image, src, dst, current):
     rgb = np.zeros((image.shape[0], image.shape[1], 3), dtype=np.uint8)
     rgb[..., 0] = image
@@ -308,23 +358,23 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
     return segs
 
 
-def reportAllMetrics(pred_heatmap: F32[Tensor, "B 1 H W"],
-                     target_heatmap: F32[Tensor, "B 1 H W"],
-                     batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
+def reportAllMetrics(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
                      batch_target_segs: List[F32[Tensor, "Q N_interp 2"]]) -> List[List[float]]:
     """
     Compute all metrics for road network prediction
 
     :param log_path: path to save the log
-    :param pred_heatmap: the predicted road network heatmap (after sigmoid)
-    :param target_heatmap: the target road network heatmap (binary)
     :param batch_pred_segs: list of predicted segments
     :param batch_target_segs: list of target segments
     :return: accuracy, precision, recall, f1, MAE, MSE
     """
-    heatmap_accuracy, heatmap_precision, heatmap_recall, heatmap_f1 = heatmapMetric(pred_heatmap, target_heatmap)
+    # heatmap_accuracy, heatmap_precision, heatmap_recall, heatmap_f1 = heatmapMetric(pred_heatmap, target_heatmap)
     hungarian_mae, hungarian_mse = hungarianMetric(batch_pred_segs, batch_target_segs)
     chamfer_mae, chamfer_mse = chamferMetric(batch_pred_segs, batch_target_segs)
+    diff_seg_count = segCountMetric(batch_pred_segs, batch_target_segs)
+    diff_seg_length = segLengthMetric(batch_pred_segs, batch_target_segs)
 
-    return [heatmap_accuracy, heatmap_precision, heatmap_recall, heatmap_f1,
-            hungarian_mae, hungarian_mse, chamfer_mae, chamfer_mse]
+    return [hungarian_mae, hungarian_mse, chamfer_mae, chamfer_mse, diff_seg_count, diff_seg_length]
+
+    # return [heatmap_accuracy, heatmap_precision, heatmap_recall, heatmap_f1,
+    #         hungarian_mae, hungarian_mse, chamfer_mae, chamfer_mse]

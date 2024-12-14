@@ -108,8 +108,7 @@ def test(
 
     ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=2)
 
-    titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
-                "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
+    titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
     name = "graphusion"
 
@@ -134,8 +133,7 @@ def test(
 
             pred_heatmaps = segsToHeatmaps(pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
-            batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"],
-                                            pred_segs,
+            batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")

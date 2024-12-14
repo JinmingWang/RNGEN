@@ -94,23 +94,13 @@ def test(
 
     ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
 
-    titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
-                "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
+    titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
-    name = "DiT_295M"
+    name = "DiT"
 
     with open(f"Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
-
-            # batch_segs = batch["segs"]  # (1, N_segs, N_interp, 2)
-            # max_point = torch.max(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            # min_point = torch.min(batch_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
-            # point_range = max_point - min_point
-            # norm_segs = []
-            # for b, segs in enumerate(batch_segs):
-            #     norm_segs.append((segs[:batch["N_segs"][b]] - min_point) / point_range)
-
 
             with torch.no_grad():
                 latent, _ = vae.encode(batch["routes"])
@@ -128,13 +118,9 @@ def test(
             # min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
             # point_range = max_point - min_point
 
-            pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
+            # pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
-            # for i in range(len(coi_means)):
-            #     coi_means[i] = ((coi_means[i] - min_point) / point_range)
-
-            batch_scores = reportAllMetrics(pred_heatmaps, batch["target_heatmaps"],
-                                            coi_means,
+            batch_scores = reportAllMetrics(coi_means,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             # plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")

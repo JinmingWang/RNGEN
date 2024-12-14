@@ -186,7 +186,7 @@ class CrossAttnBlock(nn.Module):
         if self.score == "prod":
             attn = torch.softmax(q @ k.transpose(-1, -2) * (self.scale  ** -0.5), dim=-1)
         else:
-            attn = torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2)
+            attn = torch.softmax(torch.exp(- torch.cdist(q, k) ** 2 / self.scale ** 2), dim=-1)
         attn = self.dropout(attn)
 
         # out shape: (B, N, H*in_c)

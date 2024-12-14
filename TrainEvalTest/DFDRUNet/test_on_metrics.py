@@ -34,8 +34,7 @@ def test(
     model.eval()
     node_extractor.eval()
 
-    titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
-                "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
+    titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
     name = "DFDRUNet"
 
@@ -48,7 +47,7 @@ def test(
                 pred_nodemap = node_extractor(pred_heatmap)
 
             pred_segs = heatmapsToSegments(pred_heatmap, pred_nodemap)
-            batch_scores = reportAllMetrics(pred_heatmap, batch["target_heatmaps"], pred_segs,
+            batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 
             batch_scores = np.array(batch_scores).T
