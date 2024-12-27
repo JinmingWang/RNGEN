@@ -61,8 +61,9 @@ def test(
         vae_path = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
         model_path = "Runs/RoutesDiT/241129_2126_295M/last.pth"
 ):
+    B = 100
     dataset = RoadNetworkDataset(folder_path=data_path,
-                                 batch_size=100,
+                                 batch_size=B,
                                  drop_last=True,
                                  set_name="test",
                                  permute_seq=False,
@@ -96,7 +97,7 @@ def test(
 
     titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
-    name = "DiT"
+    name = "GraphWalker"
 
     with open(f"Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
@@ -120,8 +121,7 @@ def test(
 
             # pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
-            batch_scores = reportAllMetrics(coi_means,
-                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
+            batch_scores = reportAllMetrics(coi_means, [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
 
             # plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
             # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")

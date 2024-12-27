@@ -102,7 +102,7 @@ class TRDiT(nn.Module):
         )
 
         self.stages = SequentialWithAdditionalInputs(*[
-            Block(N_routes, 256, 256, 256, 256, 8, dropout=0.1)
+            Block(N_routes, 256, 256, 256, 256, 8, dropout=0.15)
             for _ in range(n_layers)
         ])
 

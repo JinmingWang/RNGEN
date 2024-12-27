@@ -248,12 +248,14 @@ class SERes1D(nn.Module):
 
         self.s1 = nn.Sequential(
             nn.Conv1d(d_in, d_mid, 1, 1, 0),
-            nn.GroupNorm(8, d_mid),
+            nn.InstanceNorm1d(d_mid),
+            # nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_mid, 3, 1, 1))
 
         self.s2 = nn.Sequential(
-            nn.GroupNorm(8, d_mid),
+            nn.InstanceNorm1d(d_mid),
+            # nn.GroupNorm(8, d_mid),
             Swish(),
             nn.Conv1d(d_mid, d_out, 1, 1, 0)
         )

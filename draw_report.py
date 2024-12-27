@@ -3,7 +3,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 
-file_names = list(filter(lambda name: name.startswith("Report"), os.listdir()))
+model_names = ["DFDRUNet", "TR2RM", "SmallMap", "Graphusion", "GraphWalker"]
+
+file_names = [f"Report_{name}.csv" for name in model_names]
 
 model_names = list(map(lambda name: name[:-4].split("_")[-1], file_names))
 
@@ -13,17 +15,16 @@ reports = {model_name: pd.read_csv(file_name) for (model_name, file_name) in zip
 colors = ["red", "blue", "green", "orange", "purple", "pink", "cyan"]
 
 
-titles = ["heatmap_accuracy", "heatmap_precision", "heatmap_recall", "heatmap_f1",
-          "hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
+titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse"]
 
-fig, axes = plt.subplots(2, 4, figsize=(16, 8))
+fig, axes = plt.subplots(4, 1, figsize=(6, 8))
 axes = axes.flatten()
 
 for i, title in enumerate(titles):
     axes[i].set_title(title)
     # draw grid
     axes[i].grid(True)
-    axes[i].set_xlabel("Models")
+    # axes[i].set_xlabel("Models")
     axes[i].set_ylabel(title.replace("_", " "))
 
     model_data = [dataframe[title].to_numpy() for dataframe in reports.values()]

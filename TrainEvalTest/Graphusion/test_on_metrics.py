@@ -110,7 +110,7 @@ def test(
 
     titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
-    name = "graphusion"
+    name = "Graphusion"
 
     with open(f"Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")

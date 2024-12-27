@@ -2,64 +2,77 @@ from .Basics import *
 
 
 class MultiHeadSelfRelationMatrix(nn.Module):
-    def __init__(self, d_in: int, d_hidden: int, n_heads: int):
+    def __init__(self, d_in: int, d_hidden: int):
         super().__init__()
 
         self.d_in = d_in
-        self.n_heads = n_heads
+        self.d_hidden = d_hidden
 
-        self.edge_proj = nn.Sequential(
+        self.in_proj = nn.Sequential(
             nn.Linear(d_in, d_in),
             Swish(),
-            nn.Linear(d_in, n_heads * d_hidden),
-            Rearrange("B N (H C)", "(B H) N C", H=n_heads),
+            nn.Linear(d_in, d_hidden)
         )
 
-        self.adj_mat_proj = nn.Sequential(
-            nn.Unflatten(0, (-1, n_heads)),
-            nn.Conv2d(n_heads, 1, 1, 1, 0),
-            nn.Flatten(1, 2)
+        self.out_proj = nn.Sequential(
+            nn.Linear(d_hidden * 2, d_hidden),
+            Swish(),
+            nn.Linear(d_hidden, 1),
+            nn.Flatten(2)
         )
 
     def forward(self, x):
-        x = self.edge_proj(x)
-        mat = torch.cdist(x, x, p=2)    # (B, H, N, N)
-        return self.adj_mat_proj(mat)   # (B, N_nodes, N_nodes)
+        x = self.in_proj(x)
+
+        # All-pairs concatenation, result shape: (B, N, N, 2D)
+        x = torch.cat([x.unsqueeze(2).expand(-1, -1, x.size(1), -1),
+                       x.unsqueeze(1).expand(-1, x.size(1), -1, -1)], dim=-1)
+
+        return self.out_proj(x)
 
 
 class DRAC(nn.Module):
-    def __init__(self, threshold: float=0.5):
+    def __init__(self, n_segs: int, threshold: float):
         super().__init__()
         """
         DRAC: Duplicate Removal and Cluster Averaging for Cross-Domain Trajectory Prediction
         """
+
+        # reweighter applies a criss-cross linear to the cluster matrix
+        # so that the weight of each token in the cluster is well-adjusted
+        self.reweighter = nn.Sequential(
+            nn.Linear(n_segs, n_segs),
+            Swish(),
+            nn.Conv1d(n_segs, n_segs, 1, 1, 0),
+            Swish(),
+            nn.Linear(n_segs, n_segs),
+            Swish(),
+            nn.Conv1d(n_segs, n_segs, 1, 1, 0),
+            Swish(),
+            nn.Linear(n_segs, n_segs)
+        )
+
         self.threshold = threshold
 
+        self.filter = nn.ReLU(inplace=True)
 
     def forward(self, seqs: Float[Tensor, "B L D"], cluster_mat: Float[Tensor, "B L L"]):
         B, L, D = seqs.shape
 
-        # cluster_mat[i, j] > threshold means token i and token j are in the same cluster
-        threshold_mask = (cluster_mat < self.threshold)
+        weight_mat = self.filter(self.reweighter(cluster_mat.detach()) + cluster_mat.detach())  # (B, L, L)
+        threshold_mask = (weight_mat <= 0)
 
-        # Step 1: Cluster Averaging, compute average for each row
-        # Filtered_cluster_mat here is the weights for each token in the cluster
-        # We use threshold because we do not want tokens that are not in this cluster to affect the average
-        # Which are low-confidence tokens
-        # We use -inf because later we will use softmax to get the weights
-        # We use softmax because we are computing weighted average and the sum of the weights should be 1
-        filtered_cluster_mat = torch.masked_fill(cluster_mat, threshold_mask, -torch.inf) # (B, L, L)
-        # TODO: Check if this is correct
-        # segment can be {p1, ... pn} or {pn, ... p1}
-        cluster_means = torch.softmax(filtered_cluster_mat, dim=-1) @ seqs
-
-        cluster_means[torch.isnan(cluster_means)] = 0
+        weight_mat = torch.masked_fill(weight_mat, threshold_mask, -torch.inf)  # (B, L, L)
+        weight_mat = torch.softmax(weight_mat, dim=-1)
+        dup_cluster_means = weight_mat @ seqs.detach()  # (B, L, D)
+        # dup_cluster_means = (weight_mat / torch.sum(weight_mat, dim=2, keepdim=True)) @ seqs
+        dup_cluster_means[torch.isnan(dup_cluster_means)] = 0
 
         # Step 2: Duplicate Removal, only keep the first token in the cluster
         # lower[i, j] = 1 means token i and j are in the same cluster, and i is after j
-        lower = torch.tril(~threshold_mask, diagonal=-1)  # (B, L, L)
+        lower = torch.tril(weight_mat >= self.threshold, diagonal=-1)  # (B, L, L)
         is_first_token = torch.sum(lower, dim=2, keepdim=True) == 0  # (B, L, 1)
-        cluster_means = cluster_means * is_first_token.float()
+        cluster_means = dup_cluster_means * is_first_token.float()
 
         # Step 3: Zero removing, lots of elements are zeroed out during step 2
         # Now we want to remove them
@@ -69,7 +82,7 @@ class DRAC(nn.Module):
         for b in range(B):
             coi_means.append(cluster_means[b, is_first_token[b, :, 0]])
 
-        return cluster_means, coi_means
+        return dup_cluster_means, coi_means
 
 
 class RGVAE(nn.Module):
@@ -97,8 +110,7 @@ class RGVAE(nn.Module):
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
 
-            AttentionBlock(256, 64, 512, 256, 8),
-            AttentionBlock(256, 64, 512, 256, 8),
+            *[AttentionBlock(256, 64, 512, 256, 8) for _ in range(2)],
 
             Rearrange("B (N_routes L_route) D", "B N_routes L_route D", N_routes=N_routes),
         )
@@ -107,8 +119,8 @@ class RGVAE(nn.Module):
         self.logvar_head = nn.Linear(256, 2 * N_interp)
 
         attn_params = {
-            "d_in": 384, "d_head": 64, "d_expand": 768, "d_out": 384,
-            "n_heads": 8
+            "d_in": 384, "d_head": 32, "d_expand": 512, "d_out": 384,
+            "n_heads": 12, "dropout": 0.1
         }
 
         self.decoder_shared = nn.Sequential(
@@ -135,11 +147,11 @@ class RGVAE(nn.Module):
 
         self.cluster_head = nn.Sequential(
             AttentionBlock(**attn_params),
-            MultiHeadSelfRelationMatrix(384, 64, 16), # (B, L, L)
+            MultiHeadSelfRelationMatrix(384, 32), # (B, L, L)
             nn.Sigmoid()
         )
 
-        self.drac = DRAC(threshold)
+        self.drac = DRAC(self.N_segs, threshold)
 
 
     def encode(self, paths):

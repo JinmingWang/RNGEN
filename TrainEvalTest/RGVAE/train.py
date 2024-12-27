@@ -81,8 +81,9 @@ def train(
 
                 z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["routes"])
                 kll = kl_loss_func(z_mean, z_logvar)
-                rec = rec_loss_func(duplicate_segs, batch["routes"].flatten(1, 2))
-                cll = cluster_loss_func(duplicate_segs.detach(), cluster_mat, batch["segs"])
+                rec = rec_loss_func(duplicate_segs, batch["routes"].flatten(1, 2)) + \
+                      rec_loss_func(cluster_means, batch["routes"].flatten(1, 2))
+                cll = cluster_loss_func(cluster_means.detach(), cluster_mat, batch["segs"])
                 loss = kll + cll + rec
 
                 # Backpropagation
@@ -119,7 +120,7 @@ def train(
             plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
             plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
             plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
-            plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
+            plot_manager.plotSegments(cluster_means[0], 0, 3, "Pred Duplicate Segs")
 
             writer.add_figure("Reconstructed Graphs", plot_manager.getFigure(), global_step)
 

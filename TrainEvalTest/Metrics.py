@@ -171,7 +171,7 @@ def segCountMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
     pred_counts = [segs.shape[0] for segs in batch_pred_segs]
     target_counts = [segs.shape[0] for segs in batch_target_segs]
 
-    diff_counts = [float(pred_counts[i] - target_counts[i]) for i in range(B)]
+    diff_counts = [float(abs(pred_counts[i] - target_counts[i])) for i in range(B)]
 
     return diff_counts
 
