@@ -413,6 +413,8 @@ class RoadNetworkDataset():
         for i in range(self.N_data):
             # Get the bounding box of the segment
             points = torch.cat([self.trajs[i, j, :self.L_traj[i, j]] for j in range(self.trajs[i].shape[0])], dim=0)
+            if len(points) == 0:
+                continue
             min_point = torch.min(points, dim=0, keepdim=True).values
             max_point = torch.max(points, dim=0, keepdim=True).values
             point_range = max_point - min_point

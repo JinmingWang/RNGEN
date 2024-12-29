@@ -130,6 +130,9 @@ def chamferMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         pred_segs = batch_pred_segs[b].flatten(1)  # (P, N_interp*2)
         target_segs = batch_target_segs[b].flatten(1)  # (Q, N_interp*2)
 
+        if len(target_segs) == 0:
+            target_segs = torch.zeros_like(pred_segs)
+
         # Compute pairwise distance matrix
         cost_matrix = torch.cdist(pred_segs, target_segs, p=2)  # (P, Q)
 
@@ -200,6 +203,8 @@ def segLengthMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
         pred_lengths = torch.linalg.norm(pred_segs[:, 1:] - pred_segs[:, :-1], dim=-1).sum(dim=-1)
         # (Q, N_interp, 2) -> (Q, )
         target_lengths = torch.linalg.norm(target_segs[:, 1:] - target_segs[:, :-1], dim=-1).sum(dim=-1)
+        if len(target_lengths) == 0:
+            target_lengths = torch.zeros_like(pred_lengths)
 
         # Compute the difference in the length distribution using Wasserstein distance
         distribution_diff = wasserstein_distance(pred_lengths.cpu().numpy(), target_lengths.cpu().numpy())

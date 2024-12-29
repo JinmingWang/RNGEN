@@ -61,7 +61,7 @@ def test(
         vae_path = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
         model_path = "Runs/RoutesDiT/241129_2126_295M/last.pth"
 ):
-    B = 100
+    B = 50
     dataset = RoadNetworkDataset(folder_path=data_path,
                                  batch_size=B,
                                  drop_last=True,

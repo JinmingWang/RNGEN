@@ -78,8 +78,9 @@ def test(
         vae_path = "Runs/GraphusionVAE/241206_1058_initial/last.pth",
         model_path = "Runs/Graphusion/241207_1916_initial/last.pth"
 ):
+    B = 50
     dataset = RoadNetworkDataset(folder_path=dataset_path,
-                                 batch_size=100,
+                                 batch_size=B,
                                  drop_last=True,
                                  set_name="test",
                                  permute_seq=False,
@@ -131,10 +132,10 @@ def test(
 
             # plot_manager.plotSegments(pred_segs[0], 0, 3, "Pred Segs")
 
-            pred_heatmaps = segsToHeatmaps(pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 3)
+            # pred_heatmaps = segsToHeatmaps(pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
             batch_scores = reportAllMetrics(pred_segs,
-                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
+                                            [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
 
             # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
             # plot_manager.plotHeatmap(batch["target_heatmaps"][0], 1, 0, "Target Heatmap")
