@@ -64,9 +64,9 @@ class DDPM:
             t = torch.tensor(t).to(x_tp1.device)
 
         sample_dims = x_tp1.dim() - 1
-        beta = self.b[t].view(-1, *([1] * sample_dims))
-        alpha = self.a[t].view(-1, *([1] * sample_dims))
-        sqrt_1_minus_alpha_bar = self.sqrt_1_m_abar[t].view(-1, *([1] * sample_dims))
+        beta = self.b[t]#.view(-1, *([1] * sample_dims))
+        alpha = self.a[t]#.view(-1, *([1] * sample_dims))
+        sqrt_1_minus_alpha_bar = self.sqrt_1_m_abar[t]#.view(-1, *([1] * sample_dims))
 
         mu = (x_tp1 - beta / sqrt_1_minus_alpha_bar * epsilon_pred) / torch.sqrt(alpha)
 
