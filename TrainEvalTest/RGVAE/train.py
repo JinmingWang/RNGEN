@@ -1,5 +1,6 @@
 from datetime import datetime
 from TrainEvalTest.Utils import *
+from scipy.optimize import linear_sum_assignment
 
 import torch
 from torch.optim import AdamW
@@ -10,6 +11,50 @@ import os
 
 from Dataset import DEVICE, RoadNetworkDataset
 from Models import RGVAE, ClusterLoss, KLLoss
+
+
+def chamferMSE(batch_pred_segs, batch_target_segs) -> Tensor:
+    """
+    Find chamfer matching between predicted and target segments.
+    Then compute MAE and MSE between matched segments.
+
+    Chamfer matching is to find the best match for each segment in the predicted segments.
+
+    :param batch_pred_segs: list of predicted segments
+    :param batch_target_segs: list of target segments
+    :return: Chamfer distance
+    """
+    B = len(batch_pred_segs)
+    mse_list = []
+
+    for b in range(B):
+        pred_segs = batch_pred_segs[b].flatten(1)  # (P, N_interp*2)
+        target_segs = batch_target_segs[b].flatten(1)  # (Q, N_interp*2)
+
+        if len(target_segs) == 0:
+            target_segs = torch.zeros_like(pred_segs)
+
+        # Compute pairwise distance matrix
+        cost_matrix = torch.cdist(pred_segs, target_segs, p=2)  # (P, Q)
+
+        # Find the best match for each segment in the predicted segments
+        row_ind_p2t = torch.argmin(cost_matrix, dim=1)
+
+        # Compute MAE and MSE (match the predicted segments to the target segments)
+        mse_p2t = ((pred_segs - target_segs[row_ind_p2t]) ** 2).mean()
+
+        # Compute MAE and MSE (match the target segments to the predicted segments)
+        row_ind_t2p = torch.argmin(cost_matrix, dim=0)
+        mse_t2p = ((pred_segs[row_ind_t2p] - target_segs) ** 2).mean()
+
+        # Why do we compute p2t and also t2p?
+        # When we match p to t, some segments in p may not have a match in t, they are not counted in the loss.
+        # When we match t to p, some segments in t may not have a match in p, they are not counted in the loss.
+        # So we need to compute both to make sure all segments are counted in the loss.
+        mse = (mse_p2t + mse_t2p)
+        mse_list.append(mse)
+
+    return torch.mean(torch.stack(mse_list, dim=0))
 
 
 def train(
@@ -34,7 +79,7 @@ def train(
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
-                                 enable_aug=True,
+                                 enable_aug=False,
                                  img_H=16,
                                  img_W=16
                                  )
@@ -81,10 +126,13 @@ def train(
 
                 z_mean, z_logvar, duplicate_segs, cluster_mat, cluster_means, coi_means = vae(batch["routes"])
                 kll = kl_loss_func(z_mean, z_logvar)
+                # mse = chamferMSE(coi_means, [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
+                # rec = mse
                 rec = rec_loss_func(duplicate_segs, batch["routes"].flatten(1, 2)) + \
                       rec_loss_func(cluster_means, batch["routes"].flatten(1, 2))
+
                 cll = cluster_loss_func(cluster_means.detach(), cluster_mat, batch["segs"])
-                loss = kll + cll + rec
+                loss = kll + rec + cll
 
                 # Backpropagation
                 loss.backward()

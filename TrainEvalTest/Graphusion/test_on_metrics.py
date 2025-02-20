@@ -71,12 +71,13 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
 
 
 def test(
-        T=500,
-        beta_min = 0.0001,
-        beta_max = 0.05,
-        dataset_path = "Dataset/Tokyo",
-        vae_path = "Runs/GraphusionVAE/241206_1058_initial/last.pth",
-        model_path = "Runs/Graphusion/241207_1916_initial/last.pth"
+        T,
+        beta_min,
+        beta_max,
+        dataset_path,
+        vae_path,
+        model_path,
+        report_to
 ):
     B = 50
     dataset = RoadNetworkDataset(folder_path=dataset_path,
@@ -85,7 +86,6 @@ def test(
                                  set_name="test",
                                  permute_seq=False,
                                  enable_aug=False,
-                                 shuffle=False,
                                  img_H=256,
                                  img_W=256,
                                  need_heatmap=True,
@@ -113,7 +113,7 @@ def test(
 
     name = "Graphusion"
 
-    with open(f"Report_{name}.csv", "w") as f:
+    with open(f"{report_to}/Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
 
@@ -124,28 +124,26 @@ def test(
                                                      model=graphusion, trajs=batch["trajs"])[0]
                 f_nodes, f_edges, pred_adj_mat, pred_degrees = vae.decode(latent_pred)
 
-            # plot_manager = PlotManager(4, 2, 5)
-            # plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
-            # plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
-
             pred_segs = nodesAdjMatToSegs(f_nodes, pred_adj_mat, f_edges)
-
-            # plot_manager.plotSegments(pred_segs[0], 0, 3, "Pred Segs")
 
             # pred_heatmaps = segsToHeatmaps(pred_segs, batch["trajs"], batch["L_traj"], 256, 256, 3)
 
             batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
 
-            # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
-            # plot_manager.plotHeatmap(batch["target_heatmaps"][0], 1, 0, "Target Heatmap")
-            # plot_manager.plotHeatmap(pred_heatmaps[0], 1, 1, "Predict Heatmap")
-            # plt.savefig("Result.png", dpi=100)
-
             batch_scores = np.array(batch_scores).T
 
             for scores in batch_scores:
                 f.write(",".join([f"{s}" for s in scores]) + "\n")
+
+            # plot_manager = PlotManager(4, 2, 5)
+            # plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
+            # plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
+            # plot_manager.plotSegments(pred_segs[0], 0, 3, "Pred Segs")
+            # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
+            # plot_manager.plotHeatmap(batch["target_heatmaps"][0], 1, 0, "Target Heatmap")
+            # # plot_manager.plotHeatmap(pred_heatmaps[0], 1, 1, "Predict Heatmap")
+            # plt.savefig("Graphusion_visualize.png", dpi=100)
 
 
 if __name__ == "__main__":

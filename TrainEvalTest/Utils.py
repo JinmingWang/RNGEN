@@ -103,27 +103,32 @@ class PlotManager:
         ax = self.axs[row, col]
         if refresh:
             ax.clear()  # Clear previous content
-        ax.set_title(title, fontsize=14, color='darkblue')
+        # ax.set_title(title, fontsize=14, color='darkblue')
 
         # Extract the points for each line segment
         x_coords = segs.flatten(0, -3)[..., 0].cpu().detach().numpy()  # (N_segs, N_points)
         y_coords = segs.flatten(0, -3)[..., 1].cpu().detach().numpy()  # (N_segs, N_points)
         for seg_i in range(len(x_coords)):
-            ax.plot(x_coords[seg_i], y_coords[seg_i], linestyle='-', alpha=0.1, color=color)
-            ax.scatter(x_coords[seg_i, 0], y_coords[seg_i, 0], marker='.', color=color, s=10)
-            ax.scatter(x_coords[seg_i, -1], y_coords[seg_i, -1], marker='.', color=color, s=10)
+            ax.plot(x_coords[seg_i], y_coords[seg_i], linestyle='-', alpha=1.0, color=color)
+            ax.scatter(x_coords[seg_i, 0], y_coords[seg_i, 0], marker='.', color=color, s=100)
+            ax.scatter(x_coords[seg_i, -1], y_coords[seg_i, -1], marker='.', color=color, s=100)
 
         if xlims is None:
             xlims = [-3, 3]
         if ylims is None:
             ylims = [-3, 3]
 
-        ax.set_xlim(xlims)
-        ax.set_ylim(ylims)
-        ax.set_aspect('equal')
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.set_xlabel('Longitude', fontsize=12)
-        ax.set_ylabel('Latitude', fontsize=12)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(bottom=False, labelbottom=False,
+                       left=False, labelleft=False)
+
+        # ax.set_xlim(xlims)
+        # ax.set_ylim(ylims)
+        # ax.set_aspect('equal')
+        # ax.grid(True, linestyle='--', alpha=0.5)
+        # ax.set_xlabel('Longitude', fontsize=12)
+        # ax.set_ylabel('Latitude', fontsize=12)
 
     def plotTrajs(self, trajs, row, col, title):
         """
@@ -132,21 +137,26 @@ class PlotManager:
         """
         ax = self.axs[row, col]
         ax.clear()  # Clear previous content
-        ax.set_title(title, fontsize=14, color='darkgreen')
+        # ax.set_title(title, fontsize=14, color='darkgreen')
 
         # Extract the points for each trajectory
         for traj in trajs:
             x = traj[:, 0].cpu().detach().numpy()  # X coordinates
             y = traj[:, 1].cpu().detach().numpy()  # Y coordinates
-            ax.plot(x, y, marker='.', linestyle='-', color='#F8CB7F', markersize=5, alpha=0.3,
-                    markerfacecolor='red', lw=1)
+            ax.plot(x, y, linestyle='-', color='green', alpha=0.1, lw=1)
+            ax.scatter(x, y, marker=".", color="green", alpha=0.5)
 
-        ax.set_xlim([-3, 3])
-        ax.set_ylim([-3, 3])
-        ax.set_aspect('equal')
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.set_xlabel('Longitude', fontsize=12)
-        ax.set_ylabel('Latitude', fontsize=12)
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+        ax.tick_params(bottom=False, labelbottom=False,
+                       left=False, labelleft=False)
+
+        # ax.set_xlim([-3, 3])
+        # ax.set_ylim([-3, 3])
+        # ax.set_aspect('equal')
+        # ax.grid(True, linestyle='--', alpha=0.5)
+        # ax.set_xlabel('Longitude', fontsize=12)
+        # ax.set_ylabel('Latitude', fontsize=12)
 
     def plotHeatmap(self, heatmap, row, col, title):
         """
@@ -155,16 +165,20 @@ class PlotManager:
         """
         ax = self.axs[row, col]
         ax.clear()  # Clear previous content
-        ax.set_title(title, fontsize=14, color='darkred')
+        # ax.set_title(title, fontsize=14, color='darkred')
 
         if heatmap.ndim == 3:  # Shape (1, H, W)
             heatmap = heatmap.squeeze(0)
 
         heatmap_np = heatmap.cpu().detach().numpy()
-        cax = ax.imshow(heatmap_np, origin='lower', cmap='coolwarm')
-        if not hasattr(self.axs[row, col], 'has_color_bar'):
-            self.fig.colorbar(cax, ax=ax)
-            ax.has_color_bar = True
+        cax = ax.imshow(heatmap_np, origin='lower', cmap='bone_r')#, vmin=0, vmax=1.5)
+        # color_heatmap = np.ones((heatmap_np.shape[0], heatmap_np.shape[1], 3))
+        # color_heatmap[:, :, 1] = (heatmap_np < 0.5)
+        # color_heatmap[:, :, 2] = (heatmap_np < 0.5)
+        # cax = ax.imshow(color_heatmap, origin='lower')
+        # if not hasattr(self.axs[row, col], 'has_color_bar'):
+        #     self.fig.colorbar(cax, ax=ax)
+        #     ax.has_color_bar = True
 
         ax.axis('off')
 

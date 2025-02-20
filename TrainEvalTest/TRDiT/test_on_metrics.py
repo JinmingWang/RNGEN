@@ -54,18 +54,19 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
 
 
 def test(
-        T=500,
-        beta_min = 0.0001,
-        beta_max = 0.05,
-        data_path = "Dataset/Tokyo",
-        vae_path = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
-        model_path = "Runs/RoutesDiT/241129_2126_295M/last.pth"
+        T,
+        beta_min,
+        beta_max,
+        data_path,
+        vae_path,
+        model_path,
+        report_to,
 ):
     B = 50
     dataset = RoadNetworkDataset(folder_path=data_path,
                                  batch_size=B,
                                  drop_last=True,
-                                 set_name="test",
+                                 set_name="all",
                                  permute_seq=False,
                                  enable_aug=False,
                                  shuffle=False,
@@ -75,7 +76,7 @@ def test(
                                  )
 
     vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
-                N_interp=dataset.N_interp, threshold=0.7).to(DEVICE)
+                N_interp=dataset.N_interp, threshold=0.6).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
@@ -93,26 +94,21 @@ def test(
     # TRDiT.load_state_dict(state_dict)
     # TRDiT.eval()
 
-    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=10, data_dim=3)
+    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=20, data_dim=3)
 
     titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
 
     name = "GraphWalker"
 
-    with open(f"Report_{name}.csv", "w") as f:
+    with open(f"{report_to}/Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
-        for batch in tqdm(dataset, desc="Testing"):
+        for bi, batch in enumerate(tqdm(dataset, desc="Testing")):
 
             with torch.no_grad():
                 latent, _ = vae.encode(batch["routes"])
                 latent_noise = torch.randn_like(latent)
                 latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps", model=DiT, trajs=batch["trajs"])[0]
-                duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
-
-            # plot_manager = PlotManager(4, 2, 5)
-            # plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
-            # plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
-            # plot_manager.plotSegments(coi_means[0], 0, 2, "Pred Segs", color="green")
+                duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent)
 
             # norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
             # max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
@@ -123,18 +119,96 @@ def test(
 
             batch_scores = reportAllMetrics(coi_means, [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
 
-            # plot_manager.plotSegments(duplicate_segs[0], 0, 3, "Pred Duplicate Segs")
-            # plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
-            # plot_manager.plotHeatmap(batch["target_heatmaps"][0], 1, 0, "Target Heatmap")
-            # plot_manager.plotHeatmap(pred_heatmaps[0], 1, 1, "Predict Heatmap")
-            #
-            # plt.savefig("Result.png", dpi=100)
-
             batch_scores = np.array(batch_scores).T
 
             for scores in batch_scores:
                 f.write(",".join([f"{s}" for s in scores]) + "\n")
 
 
-if __name__ == "__main__":
-    test()
+def visualize(
+        T,
+        beta_min,
+        beta_max,
+        data_path,
+        vae_path,
+        model_path,
+        report_to,
+):
+    B = 1
+    dataset = RoadNetworkDataset(folder_path=data_path,
+                                 batch_size=B,
+                                 drop_last=True,
+                                 set_name="all",
+                                 permute_seq=False,
+                                 enable_aug=False,
+                                 shuffle=False,
+                                 img_H=256,
+                                 img_W=256,
+                                 need_heatmap=True
+                                 )
+
+    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+                N_interp=dataset.N_interp, threshold=0.6).to(DEVICE)
+    loadModels(vae_path, vae=vae)
+    vae.eval()
+
+    DiT = TRDiT(D_in=dataset.N_interp * 2,
+                N_routes=dataset.N_trajs,
+                L_route=dataset.max_L_route,
+                L_traj=dataset.max_L_traj,
+                d_context=2,
+                n_layers=8,
+                T=T).to(DEVICE)
+    #loadModels("Runs/RoutesDiT/241129_0108_300M/last.pth", TRDiT=TRDiT)
+    loadModels(model_path, DiT=DiT)
+
+    # state_dict = torch.load("Runs/PathsDiT/241128_0811_KL1e-6/last.pth")
+    # TRDiT.load_state_dict(state_dict)
+    # TRDiT.eval()
+
+    ddim = DDIM(beta_min, beta_max, T, DEVICE, "quadratic", skip_step=20, data_dim=3)
+
+    titles = ["hungarian_mae", "hungarian_mse", "chamfer_mae", "chamfer_mse", "diff_seg_count", "diff_seg_len"]
+
+    name = "GraphWalker"
+
+    with open(f"{report_to}/Report_{name}.csv", "w") as f:
+        f.write(",".join(titles) + "\n")
+        for bi, batch in enumerate(tqdm(dataset, desc="Visualizing")):
+
+            with torch.no_grad():
+                latent, _ = vae.encode(batch["routes"])
+                latent_noise = torch.randn_like(latent)
+                latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps", model=DiT, trajs=batch["trajs"])[0]
+                duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent)
+
+            # norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
+            # max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # min_point = torch.min(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
+            # point_range = max_point - min_point
+
+            # pred_heatmaps = segsToHeatmaps(coi_means, batch["trajs"], batch["L_traj"], 256, 256, 3)
+
+            plot_manager = PlotManager(4, 1, 1)
+            plot_manager.plotSegments(batch["segs"][0], 0, 0, "Segs", color="red")
+            plt.tight_layout()
+            plt.savefig(f"./reports/special/{bi}_RN.png", dpi=300)
+
+            plot_manager = PlotManager(4, 1, 1)
+            for ti in range(48):
+                batch["trajs"][0, ti, batch["L_traj"][0, ti]:] = batch["trajs"][0, ti, batch["L_traj"][0, ti] - 1]
+            plot_manager.plotTrajs(batch["trajs"][0], 0, 0, "Trajectories")
+            plt.tight_layout()
+            plt.savefig(f"./reports/special/{bi}_trajs.png", dpi=300)
+
+            plot_manager = PlotManager(4, 1, 1)
+            heatmap = torch.nn.functional.max_pool2d(batch["heatmap"], 3, 1, 1)
+            heatmap[heatmap != 0] += 10
+            plot_manager.plotHeatmap(heatmap[0], 0, 0, "Heatmaps")
+            plt.tight_layout()
+            plt.savefig(f"./reports/special/{bi}_heatmap.png", dpi=300)
+
+            plot_manager = PlotManager(4, 1, 1)
+            plot_manager.plotSegments(coi_means[0], 0, 0, "Pred Segs", color="orange")
+            plt.tight_layout()
+            plt.savefig(f"./reports/special/{bi}_e2e_segs.png", dpi=300)

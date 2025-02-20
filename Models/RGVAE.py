@@ -70,8 +70,8 @@ class DRAC(nn.Module):
 
         # Step 2: Duplicate Removal, only keep the first token in the cluster
         # lower[i, j] = 1 means token i and j are in the same cluster, and i is after j
-        lower = torch.tril(weight_mat >= self.threshold, diagonal=-1)  # (B, L, L)
-        is_first_token = torch.sum(lower, dim=2, keepdim=True) == 0  # (B, L, 1)
+        lower = torch.tril(weight_mat, diagonal=-1)  # (B, L, L)
+        is_first_token = torch.sum(lower >= self.threshold, dim=2, keepdim=True) == 0  # (B, L, 1)
         cluster_means = dup_cluster_means * is_first_token.float()
 
         # Step 3: Zero removing, lots of elements are zeroed out during step 2

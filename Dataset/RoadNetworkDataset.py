@@ -6,6 +6,35 @@ import numpy as np
 import cv2
 
 
+def regenerateHeatmaps(all_trajs, traj_lens):
+    h, w = 256, 256
+    data_count = len(all_trajs)
+    N_trajs = all_trajs.shape[1]
+
+    heatmaps = []
+    for b in tqdm(range(data_count), desc="Generating heatmaps"):
+        trajs = all_trajs[b]
+        traj_len = traj_lens[b]
+        if torch.all(traj_len != 0):
+            points = torch.cat([trajs[i, :traj_len[i]] for i in range(N_trajs)], dim=0)
+            min_point = torch.min(points, dim=0, keepdim=True).values
+            max_point = torch.max(points, dim=0, keepdim=True).values
+            point_range = max_point - min_point
+
+            norm_points = (points - min_point) / point_range
+
+            x_ids = (norm_points[:, 0] * (w - 1)).long()
+            y_ids = (norm_points[:, 1] * (h - 1)).long()
+            heatmap_flat = torch.zeros(h * w, dtype=torch.float32)
+            flat_indices = y_ids * w + x_ids
+            heatmap_flat.scatter_add_(0, flat_indices, torch.ones_like(flat_indices, dtype=torch.float32))
+            heatmaps.append(heatmap_flat.view(h, w))
+        else:
+            heatmaps.append(torch.zeros(h, w, dtype=torch.float32))
+
+    return torch.stack(heatmaps, dim=0)
+
+
 class RoadNetworkDataset():
     def __init__(self,
                  folder_path: str,
@@ -48,16 +77,18 @@ class RoadNetworkDataset():
         data_count = len(self.trajs)
         if set_name == "train":
             slicing = slice(data_count - 1000)
+            slicing = slice(data_count)
         elif set_name == "test":
             slicing = slice(data_count - 1000, None)
         elif set_name == "debug":
-            slicing = slice(300)
+            slicing = slice(data_count - 300, None)
         elif set_name == "all":
             slicing = slice(data_count)
 
         # Data Loading
 
         self.trajs = self.trajs[slicing]
+        # self.trajs[:, 24:] = 0  # reduce number of trajs provided by half
         # (N_data, N_trajs, L_route, N_interp, 2)
         self.routes = dataset["routes"][slicing]
         # (N_data, N_segs, N_interp, 2)
@@ -69,6 +100,7 @@ class RoadNetworkDataset():
         if need_heatmap:
             # (N_data, 1, H, W)
             self.heatmaps = dataset["heatmaps"][slicing]
+            # self.heatmaps = regenerateHeatmaps(self.trajs, dataset["traj_lens"]).unsqueeze(1)    # regenerate heatmaps
             self.heatmaps = torch.nn.functional.interpolate(self.heatmaps, (img_H, img_W), mode="nearest")
 
         self.L_traj = dataset["traj_lens"].to(torch.int32)

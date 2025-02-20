@@ -80,6 +80,7 @@ def hungarianMetric(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],
 
         cost_matrix = torch.cdist(pred_segs, target_segs, p=2).cpu().detach().numpy()  # (P, Q)
 
+
         row_ind, col_ind = linear_sum_assignment(cost_matrix)
 
         # Matched segments, compute MAE and MSE normally for matched segments
@@ -236,7 +237,7 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
     # Try to find a path from (kx, ky) to (x, y) with greedy search
     path = [src]
     current = src
-    while current != dst:
+    while abs(current[0] - dst[0]) + abs(current[1] - dst[1]) > 3:
         # Take the pixel with the smallest distance to the target
         neighbors = [(current[0] + dx, current[1] + dy) for dx in [-1, 0, 1] for dy in [-1, 0, 1]]
         neighbors.remove(current)
@@ -273,36 +274,76 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
     graph.add_edge(f"{src[0]}_{src[1]}", f"{dst[0]}_{dst[1]}", geometry=geometry)
 
 
+def getKeynodes(pred_heatmap):
+    edge_map = np.uint8(pred_heatmap > 0.5) * 255
+    edge_map = cv2.ximgproc.thinning(edge_map, thinningType=cv2.ximgproc.THINNING_GUOHALL)
+    # edge_map[0] = 0
+    # edge_map[-1] = 0
+    # edge_map[:, 0] = 0
+    # edge_map[:, -1] = 0
+
+    end_point_kernel = np.array([[1, 1, 1],
+                                 [1, 10, 1],
+                                 [1, 1, 1]], dtype=np.uint8)
+    bordered_edge_map = cv2.copyMakeBorder(edge_map / 255, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0)
+    end_point_map = cv2.filter2D(bordered_edge_map, -1, end_point_kernel) == 11
+    end_points = np.argwhere(end_point_map[1:-1, 1:-1])
+
+    # max-pooling
+    large_kernel = np.ones((7, 7), dtype=np.uint8)
+    likely_junction_map = (cv2.filter2D(bordered_edge_map, -1, large_kernel) >= 10) * (bordered_edge_map > 0)
+    # only one pixel is allowed to be the junction
+    # So we need to keep only one pixel within each connected component
+    num_labels, _, _, centroids = cv2.connectedComponentsWithStats(np.uint8(likely_junction_map), connectivity=8)
+    likely_junction_map = np.zeros_like(likely_junction_map)
+    likely_junction_map[centroids[1:, 1].astype(np.int32), centroids[1:, 0].astype(np.int32)] = 255
+    likely_junctions = np.argwhere(likely_junction_map[1:-1, 1:-1])
+
+    tmp = cv2.cvtColor(edge_map, cv2.COLOR_GRAY2BGR)
+    for row, col in end_points:
+        cv2.circle(tmp, (col, row), 5, (0, 255, 255), 1)
+
+    for row, col in likely_junctions:
+        cv2.circle(tmp, (col, row), 5, (255, 255, 0), 1)
+
+    # cv2.imwrite("keynodes.png", tmp)
+
+    return edge_map, np.unique(np.concatenate([end_points, likely_junctions], axis=0)[:, [1, 0]], axis=0)
+
+
 def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
                        pred_nodemaps: F32[Tensor, "B 1 H W"],
                        visualize: bool = False) -> List[F32[Tensor, "P N_interp 2"]]:
     B, _, H, W = pred_heatmaps.shape
 
     segs = []
-
-    pred_heatmaps = pred_heatmaps.cpu().numpy()
+    device = pred_heatmaps.device
+    # pred_heatmaps = pred_heatmaps.cpu().numpy()
     local_max_map = torch.nn.functional.max_pool2d(pred_nodemaps, 3, 1, 1)
     nms_nodemaps = torch.where((pred_nodemaps == local_max_map) * (pred_nodemaps >= 0.2), 1, 0)
     nms_nodemaps = nms_nodemaps.cpu().numpy()
 
     for i in range(B):
-        pred_heatmap = pred_heatmaps[i, 0]
+        pred_heatmap = pred_heatmaps[i, 0].cpu().numpy()
         nodemap = nms_nodemaps[i, 0]
 
-        x_list, y_list = np.where(nodemap == 1)
-        keynodes = zip(x_list, y_list)
+        y_list, x_list = np.where(nodemap == 1)
+        keynodes = list(zip(x_list.tolist(), y_list.tolist()))
 
-        corner_map = np.zeros_like(np.uint8(pred_heatmap))
+        # edge_map, keynodes = getKeynodes(pred_heatmap)
+
+        edge_map = np.uint8(pred_heatmap > 0.5) * 255
+        edge_map = cv2.ximgproc.thinning(edge_map)
+
+        # cv2.imwrite("edge_map.png", edge_map)
+        # cv2.imwrite("nms_nodemap.png", np.uint8(nms_nodemaps[i, 0]) * 255)
+
         graph = nx.Graph()
         for (x, y) in keynodes:
-            corner_map[y, x] = 255
-            pred_heatmap[y, x] = 1.0
+            edge_map[y, x] = 255
             graph.add_node(f"{x}_{y}", pos=(x, y))
 
         # Now extract the edges (1-pixel wide) from the predicted heatmap
-        edge_map = np.uint8(pred_heatmap > 0.5) * 255
-
-        cv2.imwrite("edge_map.png", edge_map)
 
         temp_map = edge_map.copy()
 
@@ -339,7 +380,7 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
 
         segs.append(
             torch.tensor([data["geometry"].coords for u, v, data in graph.edges(data=True)], dtype=torch.float32,
-                         device=pred_nodemaps.device))
+                         device=device))
 
         for seg_i in range(len(segs[-1])):
             if segs[-1][seg_i, 0, 0] > segs[-1][seg_i, -1, 0]:
@@ -357,10 +398,11 @@ def heatmapsToSegments(pred_heatmaps: F32[Tensor, "B 1 H W"],
             # segs[-1] = ((segs[-1] - min_point) / point_range)
             if torch.any(torch.isnan(segs[-1])):
                 print("nan")
+                segs[-1][torch.isnan(segs[-1])] = 0
         except:
             segs[-1] = torch.zeros(1, 8, 2, dtype=torch.float32, device=pred_nodemaps.device)
 
-    return segs
+    return segs, temp_map
 
 
 def reportAllMetrics(batch_pred_segs: List[F32[Tensor, "P N_interp 2"]],

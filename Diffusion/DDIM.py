@@ -75,7 +75,7 @@ class DDIM:
         :return: x_t-1: output images (B, C, L)
         """
         pred_x0 = (x_tp1 - self.sqrt_1_m_αbar[t] * ϵ_pred) / self.sqrt_αbar[t]
-        if t <= self.skip_step * 3:
+        if t <= self.skip_step:
             return pred_x0
         return self.diffusionForward(pred_x0, next_t, ϵ_pred)
 
@@ -115,9 +115,7 @@ class DDIM:
         B = noises[0].shape[0]
         content_list = [noise.clone() for noise in noises]
         tensor_t = torch.arange(self.T, dtype=torch.long, device=self.device).repeat(B, 1)  # (B, T)
-        t_list = list(range(self.T - 1, -1, -self.skip_step))
-        if t_list[-1] != 0:
-            t_list.append(0)
+        t_list = list(range(self.T - 1, self.skip_step, -self.skip_step)) + list(range(self.skip_step, -1, -1))
         pbar = tqdm(t_list) if verbose else t_list
         for ti, t in enumerate(pbar):
             if mode == "eps":

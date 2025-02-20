@@ -8,9 +8,10 @@ from Dataset import DEVICE, RoadNetworkDataset
 from Models import DFDRUNet, NodeExtractor
 
 def test(
-        dataset_path: str = "Dataset/Tokyo",
-        model_path: str = "Runs/DFDRUNet/241201_1533_initial/last.pth",
-        node_extractor_path: str = "Runs/NodeExtractor/241126_2349_initial/last.pth"
+        dataset_path: str,
+        model_path: str,
+        node_extractor_path: str,
+        report_to: str
 ):
     dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=100,
@@ -38,7 +39,7 @@ def test(
 
     name = "DFDRUNet"
 
-    with open(f"Report_{name}.csv", "w") as f:
+    with open(f"{report_to}/Report_{name}.csv", "w") as f:
         f.write(",".join(titles) + "\n")
         for batch in tqdm(dataset, desc="Testing"):
 
@@ -46,7 +47,7 @@ def test(
                 pred_heatmap = model(batch["image"], batch["heatmap"])
                 pred_nodemap = node_extractor(pred_heatmap)
 
-            pred_segs = heatmapsToSegments(pred_heatmap, pred_nodemap)
+            pred_segs, tmp_map = heatmapsToSegments(pred_heatmap, pred_nodemap)
             batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(100)])
 

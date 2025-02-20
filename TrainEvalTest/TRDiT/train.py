@@ -38,7 +38,7 @@ def train(
                                  batch_size=B,
                                  drop_last=True,
                                  set_name="train",
-                                 enable_aug=True,
+                                 enable_aug=False,
                                  img_H=16,
                                  img_W=16
                                  )
