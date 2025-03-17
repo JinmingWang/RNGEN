@@ -1,4 +1,5 @@
 from .Basics import *
+from .Old import AttentionBlockOld
 
 class Block(nn.Module):
     def __init__(self,
@@ -31,7 +32,7 @@ class Block(nn.Module):
             Rearrange("(B N) D L", "B (N L) D", N=n_paths)
         )
 
-        self.attn = AttentionBlock(
+        self.attn = AttentionBlockOld(
             d_in=d_mid,
             d_head=64,
             d_expand=d_mid * 2,
@@ -57,7 +58,7 @@ class Block(nn.Module):
         return self.out_proj(x) + residual
 
 
-class TRDiT(nn.Module):
+class TWDiT(nn.Module):
     def __init__(self, D_in: int, N_routes: int, L_route: int, L_traj: int, d_context: int, n_layers: int, T: int):
         super().__init__()
         self.D_in = D_in
@@ -97,8 +98,8 @@ class TRDiT(nn.Module):
 
             # Attention among all traj tokens
             Rearrange("(B N) D L", "B (N L) D", N=N_routes),
-            AttentionBlock(256, 64, 512, 256, 4),
-            AttentionBlock(256, 64, 512, 256, 4),
+            AttentionBlockOld(256, 64, 512, 256, 4),
+            AttentionBlockOld(256, 64, 512, 256, 4),
         )
 
         self.stages = SequentialWithAdditionalInputs(*[

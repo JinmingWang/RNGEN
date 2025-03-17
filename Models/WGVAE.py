@@ -1,4 +1,5 @@
 from .Basics import *
+from .Old import *
 
 
 class MultiHeadSelfRelationMatrix(nn.Module):
@@ -85,7 +86,7 @@ class DRAC(nn.Module):
         return dup_cluster_means, coi_means
 
 
-class RGVAE(nn.Module):
+class WGVAE(nn.Module):
     def __init__(self, N_routes: int, L_route: int, N_interp: int, threshold: float=0.5):
         super().__init__()
         self.N_routes = N_routes
@@ -110,7 +111,7 @@ class RGVAE(nn.Module):
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
 
-            *[AttentionBlock(256, 64, 512, 256, 8) for _ in range(2)],
+            *[AttentionBlockOld(256, 64, 512, 256, 8, score="dist") for _ in range(2)],
 
             Rearrange("B (N_routes L_route) D", "B N_routes L_route D", N_routes=N_routes),
         )
@@ -120,7 +121,7 @@ class RGVAE(nn.Module):
 
         attn_params = {
             "d_in": 384, "d_head": 32, "d_expand": 512, "d_out": 384,
-            "n_heads": 12, "dropout": 0.1
+            "n_heads": 12, "dropout": 0.1, "score":"dist"
         }
 
         self.decoder_shared = nn.Sequential(
@@ -135,18 +136,18 @@ class RGVAE(nn.Module):
             nn.Conv1d(128, 384, 1, 1, 0),
 
             Rearrange("(B N_routes) D L_route", "B (N_routes L_route) D", N_routes=N_routes),
-            *[AttentionBlock(**attn_params) for _ in range(6)],
+            *[AttentionBlockOld(**attn_params) for _ in range(6)],
         )
 
         self.segs_head = nn.Sequential(
-            AttentionBlock(**attn_params),
+            AttentionBlockOld(**attn_params),
             nn.Linear(384, 128),
             Swish(),
             nn.Linear(128, N_interp * 2)
         )
 
         self.cluster_head = nn.Sequential(
-            AttentionBlock(**attn_params),
+            AttentionBlockOld(**attn_params),
             MultiHeadSelfRelationMatrix(384, 32), # (B, L, L)
             nn.Sigmoid()
         )
