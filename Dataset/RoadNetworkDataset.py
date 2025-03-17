@@ -48,7 +48,8 @@ class RoadNetworkDataset():
                  img_W: int = 256,
                  need_image: bool = False,
                  need_heatmap: bool = False,
-                 need_nodes: bool = False) -> None:
+                 need_nodes: bool = False,
+                 more_noise_std: float = 0.0) -> None:
         """
         Initialize the dataset, this class loads data from a cache file
         The cache file is created by using LaDeDatasetCacheGenerator class
@@ -69,6 +70,7 @@ class RoadNetworkDataset():
         self.need_image = need_image
         self.need_heatmap = need_heatmap
         self.need_nodes = need_nodes
+        self.more_noise_std = more_noise_std
 
         dataset = torch.load(os.path.join(folder_path, "dataset.pt"))
 
@@ -107,8 +109,8 @@ class RoadNetworkDataset():
         self.L_route = dataset["route_lens"].to(torch.int32)
         self.N_segs = dataset["seg_nums"].to(torch.int32)
 
-        self.mean_norm = dataset["point_mean"]
-        self.std_norm = dataset["point_std"]
+        self.mean_norm = dataset["point_mean"][slicing]
+        self.std_norm = dataset["point_std"][slicing]
 
         self.bboxes = dataset["bboxes"]
 
@@ -220,7 +222,7 @@ class RoadNetworkDataset():
             segs = segs[:, segs_perm]
 
         batch_data = {
-            "trajs": trajs,
+            "trajs": trajs + torch.randn_like(trajs) * self.more_noise_std,
             "routes": routes,
             "segs": segs,
             "L_traj": L_traj,
