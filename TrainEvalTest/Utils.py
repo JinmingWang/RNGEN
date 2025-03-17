@@ -103,7 +103,7 @@ class PlotManager:
         ax = self.axs[row, col]
         if refresh:
             ax.clear()  # Clear previous content
-        # ax.set_title(title, fontsize=14, color='darkblue')
+        ax.set_title(title, fontsize=14, color='darkblue')
 
         # Extract the points for each line segment
         x_coords = segs.flatten(0, -3)[..., 0].cpu().detach().numpy()  # (N_segs, N_points)
@@ -123,12 +123,12 @@ class PlotManager:
         ax.tick_params(bottom=False, labelbottom=False,
                        left=False, labelleft=False)
 
-        # ax.set_xlim(xlims)
-        # ax.set_ylim(ylims)
-        # ax.set_aspect('equal')
-        # ax.grid(True, linestyle='--', alpha=0.5)
-        # ax.set_xlabel('Longitude', fontsize=12)
-        # ax.set_ylabel('Latitude', fontsize=12)
+        ax.set_xlim(xlims)
+        ax.set_ylim(ylims)
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.set_xlabel('Longitude', fontsize=12)
+        ax.set_ylabel('Latitude', fontsize=12)
 
     def plotTrajs(self, trajs, row, col, title):
         """
@@ -151,12 +151,12 @@ class PlotManager:
         ax.tick_params(bottom=False, labelbottom=False,
                        left=False, labelleft=False)
 
-        # ax.set_xlim([-3, 3])
-        # ax.set_ylim([-3, 3])
-        # ax.set_aspect('equal')
-        # ax.grid(True, linestyle='--', alpha=0.5)
-        # ax.set_xlabel('Longitude', fontsize=12)
-        # ax.set_ylabel('Latitude', fontsize=12)
+        ax.set_xlim([-3, 3])
+        ax.set_ylim([-3, 3])
+        ax.set_aspect('equal')
+        ax.grid(True, linestyle='--', alpha=0.5)
+        ax.set_xlabel('Longitude', fontsize=12)
+        ax.set_ylabel('Latitude', fontsize=12)
 
     def plotHeatmap(self, heatmap, row, col, title):
         """
