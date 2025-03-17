@@ -5,7 +5,8 @@ class ClusterLoss(nn.Module):
         super(ClusterLoss, self).__init__()
         self.bce_loss = nn.BCELoss()
 
-    def getClusterMat(self, target_seq: Tensor) -> Tensor:
+    @staticmethod
+    def getClusterMat(target_seq: Tensor) -> Tensor:
         # target_seq: (B, N, D)
         # Two tokens are in the same cluster if they are the same
         # so, generate a (B, N, N) matrix where cluster_mat[i, j] = 1 if target_seq[i] == target_seq[j]
@@ -39,8 +40,8 @@ class ClusterLoss(nn.Module):
         # Step 4. calculate the loss
         return self.bce_loss(pred_cluster_mat, target_cluster_mat)
 
-
-    def getClusters(self, input_seq, cluster_mat):
+    @staticmethod
+    def getClusters(input_seq, cluster_mat):
         # input_seq: (M, D)
         # cluster_mat: (M, M) or (M, M)
         M, D = input_seq.shape

@@ -265,13 +265,16 @@ def findAndAddPath(graph, heatmap, src, dst, visualize) -> LineString:
             cv2.imshow("search_map", cv2.resize(tmp, (512, 512), interpolation=cv2.INTER_NEAREST))
             cv2.waitKey(1)
 
-    geometry = LineString(path)
+    try:
+        geometry = LineString(path)
 
-    length = geometry.length
-    interp_times = np.linspace(0, length, 8)
-    geometry = LineString([geometry.interpolate(i) for i in interp_times])
+        length = geometry.length
+        interp_times = np.linspace(0, length, 8)
+        geometry = LineString([geometry.interpolate(i) for i in interp_times])
 
-    graph.add_edge(f"{src[0]}_{src[1]}", f"{dst[0]}_{dst[1]}", geometry=geometry)
+        graph.add_edge(f"{src[0]}_{src[1]}", f"{dst[0]}_{dst[1]}", geometry=geometry)
+    except:
+        pass
 
 
 def getKeynodes(pred_heatmap):
