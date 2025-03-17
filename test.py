@@ -18,7 +18,7 @@ weights = {
         "Graphusion": "Runs/Graphusion/241213_0709_Tokyo/last.pth",
         "WGVAE_MHSA": "Runs/WGVAE_MHSA/250225_1110_Tokyo/last.pth",
         "TWDiT_MHSA": "Runs/TWDiT_MHSA/250225_2046_Tokyo/last.pth",
-        "TWDiT_NoVAE": "Runs/TWDiT_NoVAE/250226_1517_Tokyo/last.pth"
+        "TWDiT_NoVAE": "Runs/TWDiT_NoVAE/250226_1517_Tokyo/last.pth",
     },
     "Shanghai": {
         "TR2RM": "Runs/TR2RM/241214_2302_Shanghai/last.pth",

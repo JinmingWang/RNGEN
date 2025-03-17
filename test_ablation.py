@@ -5,6 +5,7 @@ from TrainEvalTest.Graphusion.test_on_metrics import test as test_Graphusion
 from TrainEvalTest.SmallMapUNet.test_on_metrics import test as test_SmallMap
 from TrainEvalTest.TWDiT_MHSA.test_on_metrics import test as test_TWDiT_MHSA
 from TrainEvalTest.TWDiT_NoVAE.test_on_metrics import test as test_TWDiT_NoVAE
+from TrainEvalTest.TGTransformer.test_on_metrics import test as test_TGTransformer
 import os
 
 weights = {
@@ -16,6 +17,7 @@ weights = {
         "TWDiT_NoVAE": "Runs/TWDiT_NoVAE/250226_1517_Tokyo/last.pth",
         "Deduplicator": "Runs/Deduplicator/250228_0919_Tokyo/last.pth",
         "WGVAE_new": "Runs/WGVAE_NEW/250310_0951_Tokyonew/last.pth",
+        "TGTransformer": "Runs/TGTransformer/250304_0110_Tokyo/last.pth"
     },
     "Shanghai": {
         "WGVAE": "Runs/WGVAE/241218_2207_Shanghai/last.pth",
@@ -49,16 +51,16 @@ def test_all():
         #     report_to=report_to
         # )
         #
-        print(f"Start Testing TWDiT_MHSA on {load_dataset}")
-        test_TWDiT_MHSA(
-            T=500,
-            beta_min=0.0001,
-            beta_max=0.05,
-            data_path=f"Dataset/{load_dataset}",
-            model_path="Runs/TWDiT_MHSA/250311_1025_Tokyonew/last.pth",
-            vae_path=weights[weight_dataset]["WGVAE_new"],
-            report_to=report_to
-        )
+        # print(f"Start Testing TWDiT_MHSA on {load_dataset}")
+        # test_TWDiT_MHSA(
+        #     T=500,
+        #     beta_min=0.0001,
+        #     beta_max=0.05,
+        #     data_path=f"Dataset/{load_dataset}",
+        #     model_path="Runs/TWDiT_MHSA/250311_1025_Tokyonew/last.pth",
+        #     vae_path=weights[weight_dataset]["WGVAE_new"],
+        #     report_to=report_to
+        # )
 
         # print(f"Start Testing TWDiT_NoVAE on {load_dataset}")
         # test_TWDiT_NoVAE(
@@ -70,6 +72,13 @@ def test_all():
         #     #deduplicator_path=weights[weight_dataset]["Deduplicator"],
         #     report_to=report_to
         # )
+
+        print(f"Start Trasting TGTransformer on {load_dataset}")
+        test_TGTransformer(
+            dataset_path=f"Dataset/{load_dataset}",
+            model_path=weights[weight_dataset]["TGTransformer"],
+            report_to=report_to
+        )
 
 
 if __name__ == "__main__":
