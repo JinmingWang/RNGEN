@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import RGVAE, ClusterLoss, KLLoss
+from Models import WGVAE, ClusterLoss, KLLoss
 
 
 def chamferMSE(batch_pred_segs, batch_target_segs) -> Tensor:
@@ -72,7 +72,7 @@ def train(
         log_interval: int = 10,
         load_weights: str = "Runs/CDVAE/241125_0625_sparse/last.pth"
 ):
-    log_dir = f"./Runs/RGVAE/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
+    log_dir = f"./Runs/WGVAE/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
 
     # Dataset & DataLoader
     dataset = RoadNetworkDataset(folder_path=dataset_path,
@@ -84,7 +84,7 @@ def train(
                                  img_W=16
                                  )
 
-    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    vae = WGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route, N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
 
     if load_weights is not None:
         loadModels(load_weights, vae=vae)

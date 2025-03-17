@@ -1,5 +1,5 @@
 from TrainEvalTest.Utils import *
-from TrainEvalTest.TRDiT.eval import getEvalFunction
+from TrainEvalTest.TWDiT_MHSA.eval import getEvalFunction
 from datetime import datetime
 
 import torch
@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import TRDiT, RGVAE
+from Models import TWDiT_MHSA, WGVAE_MHSA, WGVAE_new
 from Diffusion import DDIM
 
 def train(
@@ -32,7 +32,7 @@ def train(
         vae_path: str = "Runs/CDVAE/241127_1833_sparse_kl1e-6/last.pth",
         load_weights: str = None
 ):
-    log_dir = f"./Runs/TRDiT/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
+    log_dir = f"./Runs/TWDiT_MHSA/{datetime.now().strftime('%Y%m%d_%H%M')[2:]}_{title}/"
     # Dataset & DataLoader
     dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=B,
@@ -44,12 +44,13 @@ def train(
                                  )
 
     # Models
-    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
-                N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    # vae = WGVAE_MHSA(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+    #             N_interp=dataset.N_interp, threshold=0.5).to(DEVICE)
+    vae = WGVAE_new(dataset.N_interp, threshold=0.5).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
-    DiT = TRDiT(D_in=dataset.N_interp * 2,
+    DiT = TWDiT_MHSA(D_in=dataset.N_interp * 2,
                 N_routes=dataset.N_trajs,
                 L_route=dataset.max_L_route,
                 L_traj=dataset.max_L_traj,
