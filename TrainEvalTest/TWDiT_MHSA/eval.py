@@ -1,6 +1,6 @@
 from Dataset import RoadNetworkDataset
 from TrainEvalTest.Utils import *
-from Models import RGVAE
+from Models import WGVAE_MHSA
 from Diffusion import DDIM
 
 from typing import Callable
@@ -13,7 +13,7 @@ def pred_func(noisy_contents: List[Tensor], t: Tensor, model: torch.nn.Module, t
     return [pred]
 
 
-def getEvalFunction(dataset_path: str, vae: RGVAE) -> Callable:
+def getEvalFunction(dataset_path: str, vae: WGVAE_MHSA) -> Callable:
     """
     Evaluate the model on the given batch
     :param vae: The VAE model
@@ -43,13 +43,15 @@ def getEvalFunction(dataset_path: str, vae: RGVAE) -> Callable:
 
         with torch.no_grad():
             latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps", model=DiT, trajs=batch["trajs"])[0]
-            duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
+            # duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
+            duplicate_segs, sim_mat, uniqueness_mask, unique_seqs = vae.decode(latent_pred)
 
         loss = torch.nn.functional.mse_loss(duplicate_segs, batch["routes"].flatten(1, 2))
 
         plot_manager.plotSegments(batch["routes"][0], 0, 0, "Routes", color="red")
         plot_manager.plotSegments(batch["segs"][0], 0, 1, "Segs", color="blue")
-        plot_manager.plotSegments(coi_means[0].detach(), 0, 2, "Pred Segs", color="green")
+        # plot_manager.plotSegments(coi_means[0].detach(), 0, 2, "Pred Segs", color="green")
+        plot_manager.plotSegments(unique_seqs[0].detach(), 0, 2, "Pred Segs", color="green")
         plot_manager.plotSegments(duplicate_segs[0].detach(), 0, 3, "Pred Duplicate Segs")
         plot_manager.plotTrajs(batch["trajs"][0], 0, 4, "Trajectories")
 

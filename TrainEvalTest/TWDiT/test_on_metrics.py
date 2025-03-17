@@ -7,7 +7,7 @@ import cv2
 import torch
 
 from Dataset import DEVICE, RoadNetworkDataset
-from Models import RGVAE, TRDiT
+from Models import WGVAE, TWDiT
 
 
 def segsToHeatmaps(batch_segs: Tensor, batch_trajs: Tensor, traj_lens: Tensor, img_H: int, img_W: int, line_width: int):
@@ -66,7 +66,7 @@ def test(
     dataset = RoadNetworkDataset(folder_path=data_path,
                                  batch_size=B,
                                  drop_last=True,
-                                 set_name="all",
+                                 set_name="test",
                                  permute_seq=False,
                                  enable_aug=False,
                                  shuffle=False,
@@ -75,12 +75,12 @@ def test(
                                  need_heatmap=True
                                  )
 
-    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+    vae = WGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                 N_interp=dataset.N_interp, threshold=0.6).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
-    DiT = TRDiT(D_in=dataset.N_interp * 2,
+    DiT = TWDiT(D_in=dataset.N_interp * 2,
                 N_routes=dataset.N_trajs,
                 L_route=dataset.max_L_route,
                 L_traj=dataset.max_L_traj,
@@ -108,7 +108,7 @@ def test(
                 latent, _ = vae.encode(batch["routes"])
                 latent_noise = torch.randn_like(latent)
                 latent_pred = ddim.diffusionBackward([latent_noise], pred_func, mode="eps", model=DiT, trajs=batch["trajs"])[0]
-                duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent)
+                duplicate_segs, cluster_mat, cluster_means, coi_means = vae.decode(latent_pred)
 
             # norm_pred_segs = duplicate_segs  # (1, N_segs, N_interp, 2)
             # max_point = torch.max(norm_pred_segs.view(-1, 2), dim=0).values.view(1, 1, 2)
@@ -147,12 +147,12 @@ def visualize(
                                  need_heatmap=True
                                  )
 
-    vae = RGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
+    vae = WGVAE(N_routes=dataset.N_trajs, L_route=dataset.max_L_route,
                 N_interp=dataset.N_interp, threshold=0.6).to(DEVICE)
     loadModels(vae_path, vae=vae)
     vae.eval()
 
-    DiT = TRDiT(D_in=dataset.N_interp * 2,
+    DiT = TWDiT(D_in=dataset.N_interp * 2,
                 N_routes=dataset.N_trajs,
                 L_route=dataset.max_L_route,
                 L_traj=dataset.max_L_traj,

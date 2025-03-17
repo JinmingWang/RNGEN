@@ -1,4 +1,4 @@
-from TrainEvalTest.TRDiT.test_on_metrics import visualize as visualize_RN_Traj_Heatmap_Segs
+from TrainEvalTest.TWDiT.test_on_metrics import visualize as visualize_RN_Traj_Heatmap_Segs
 from TrainEvalTest.TR2RM.test_on_metrics import visualize as visualize_PredHeatmap_PredSegs
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ def test(
     dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=B,
                                  drop_last=True,
-                                 set_name="all",
+                                 set_name="test",
                                  shuffle=False,
                                  permute_seq=False,
                                  enable_aug=False,

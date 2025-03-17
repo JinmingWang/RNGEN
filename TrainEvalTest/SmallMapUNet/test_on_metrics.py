@@ -15,7 +15,7 @@ def test(
         node_extractor_path: str,
         report_to: str
 ):
-    B = 1
+    B = 100
     dataset = RoadNetworkDataset(folder_path=dataset_path,
                                  batch_size=B,
                                  drop_last=True,
@@ -30,10 +30,10 @@ def test(
 
     stage_1 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
     stage_2 = UNet2D(n_repeats=2, expansion=2).to(DEVICE)
-    # node_extractor = NodeExtractor().to(DEVICE)
+    node_extractor = NodeExtractor().to(DEVICE)
 
     loadModels(model_path, stage_1=stage_1, stage_2=stage_2)
-    # loadModels(node_extractor_path, node_model=node_extractor)
+    loadModels(node_extractor_path, node_model=node_extractor)
 
     stage_1.eval()
     stage_2.eval()
@@ -50,9 +50,9 @@ def test(
             with torch.no_grad():
                 pred_1 = stage_1(batch["heatmap"])
                 pred_2 = stage_2(pred_1)
-                # pred_nodemap = node_extractor(pred_2)
+                pred_nodemap = node_extractor(pred_2)
 
-            pred_segs, temp_map = heatmapsToSegments(pred_2, None)
+            pred_segs, temp_map = heatmapsToSegments(pred_2, pred_nodemap)
             batch_scores = reportAllMetrics(pred_segs,
                                             [batch["segs"][b][:batch["N_segs"][b]] for b in range(B)])
 
